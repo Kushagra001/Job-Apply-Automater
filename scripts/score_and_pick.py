@@ -59,8 +59,8 @@ client = Groq()
 FALLBACK_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3.6-27b",
-    "llama-3.1-8b-instant"
+    "groq/compound",
+    "groq/compound-mini"
 ]
 _CURRENT_MODEL_INDEX = 0
 
@@ -109,13 +109,15 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
                 temperature=0,
             )
             result = json.loads(response.choices[0].message.content)
+            if isinstance(result, list):
+                result = result[0] if result else {}
             return {
                 "score": result.get("score", 0),
                 "missing_skills": result.get("missing_skills", []),
                 "reasoning": result.get("reasoning", "")
             }
-        except RateLimitError as e:
-            logger.warning("Rate limit hit for model %s: %s", model_name, e)
+        except GroqError as e:
+            logger.warning("Groq API error for model %s: %s", model_name, e)
             last_error = e
             if os.environ.get("GROQ_MODEL"):
                 raise e  # If user explicitly forced a model, don't fall back
@@ -123,8 +125,8 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
             _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
             logger.info("Switched to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
         except Exception as e:
-            logger.error("Groq API call failed: %s", e)
-            raise e
+            logger.error("Unexpected error scoring JD: %s", e)
+            return {"score": 0, "missing_skills": [], "reasoning": f"Error: {e}"}
             
     if last_error:
         raise last_error

@@ -86,8 +86,8 @@ def validate_tailored(original: dict, tailored: dict) -> None:
 FALLBACK_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3.6-27b",
-    "llama-3.1-8b-instant"
+    "groq/compound",
+    "groq/compound-mini"
 ]
 _CURRENT_MODEL_INDEX = 0
 
@@ -141,10 +141,12 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
                 temperature=0,
             )
             tailored = json.loads(response.choices[0].message.content)
+            if isinstance(tailored, list):
+                tailored = tailored[0] if tailored else {}
             validate_tailored(variant_json, tailored)
             return tailored
-        except RateLimitError as e:
-            logger.warning("Rate limit hit for model %s: %s", model_name, e)
+        except GroqError as e:
+            logger.warning("Groq API error for model %s: %s", model_name, e)
             last_error = e
             if os.environ.get("GROQ_MODEL"):
                 raise e  # If user explicitly forced a model, don't fall back
@@ -155,7 +157,7 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
             logger.error("Validation failed: %s. Returning original variant.", ve)
             return copy.deepcopy(variant_json)
         except Exception as e:
-            logger.error("Groq API call failed: %s", e)
+            logger.error("Unexpected error tailoring resume: %s", e)
             return copy.deepcopy(variant_json)
 
     if last_error:
