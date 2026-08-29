@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Resume</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0.5in;
+        }
+        body {
+            font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.3;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .name {
+            font-size: 20pt;
+            font-weight: bold;
+            color: #1e3a8a;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .contact {
+            font-size: 9pt;
+            color: #555;
+        }
+        .contact a {
+            color: #1e3a8a;
+            text-decoration: none;
+        }
+        .contact a:hover {
+            text-decoration: underline;
+        }
+        
+        .section-title {
+            font-size: 11pt;
+            font-weight: bold;
+            color: #1e3a8a;
+            text-transform: uppercase;
+            border-bottom: 1.5px solid #1e3a8a;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            padding-bottom: 2px;
+        }
+        
+        .content-block {
+            margin-bottom: 8px;
+        }
+        
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        
+        .bold {
+            font-weight: bold;
+        }
+        
+        .italic {
+            font-style: italic;
+        }
+        
+        .date {
+            font-style: italic;
+            color: #555;
+            white-space: nowrap;
+        }
+        
+        ul {
+            margin-top: 4px;
+            margin-bottom: 4px;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 3px;
+        }
+        
+        .links {
+            font-size: 9pt;
+            margin-top: 2px;
+            margin-bottom: 4px;
+        }
+        .links a {
+            color: #1e3a8a;
+            text-decoration: underline;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="name">Kushagra Singh Negi</div>
+        <div class="contact">
+            Jaipur, India | +91 9521693663 | <a href="mailto:kushagrasinghnegi9@gmail.com">kushagrasinghnegi9@gmail.com</a> | <a href="https://linkedin.com">LinkedIn</a> | <a href="https://github.com">GitHub</a> | <a href="https://portfolio.com">Portfolio</a>
+        </div>
+    </div>
+
+    {% if summary %}
+    <div class="section-title">SUMMARY</div>
+    <div class="content-block">
+        {{ summary }}
+    </div>
+    {% endif %}
+
+    {% if skills %}
+    <div class="section-title">SKILLS</div>
+    <div class="content-block">
+        {{ skills | join(', ') }}
+    </div>
+    {% endif %}
+
+    {% if experience %}
+    <div class="section-title">EXPERIENCE</div>
+    {% for job in experience %}
+    <div class="content-block">
+        <div class="flex-between">
+            <div><span class="bold">{{ job.company }}</span> &mdash; <span class="bold">{{ job.role }}</span></div>
+            <div class="date">{{ job.dates }}</div>
+        </div>
+        <ul>
+            {% for bullet in job.bullets %}
+            <li>{{ bullet }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if education %}
+    <div class="section-title">EDUCATION</div>
+    <div class="content-block">
+        {% for edu in education %}
+        <div style="margin-bottom: 2px;">{{ edu }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if projects %}
+    <div class="section-title">PROJECTS</div>
+    {% for proj in projects %}
+    <div class="content-block">
+        <div>
+            <span class="bold">{{ proj.name }}</span> {% if proj.stack %}| <span class="italic">{{ proj.stack }}</span>{% endif %}
+        </div>
+        <ul>
+            {% for bullet in proj.bullets %}
+            <li>{{ bullet }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if certifications %}
+    <div class="section-title">CERTIFICATIONS</div>
+    <div class="content-block">
+        {{ certifications | join(' | ') }}
+    </div>
+    {% endif %}
+
+</body>
+</html>

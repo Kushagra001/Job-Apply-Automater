@@ -1,0 +1,10 @@
+{
+  "title": "Senior Frontend Engineer",
+  "company": "Acme Corp",
+  "location": "Remote",
+  "remote": true,
+  "description": "We are looking for a Senior Frontend Engineer to join our team. You will build high-quality, scalable React applications. Requirements: 4+ years of React, TypeScript, Next.js, REST APIs, CSS-in-JS or Tailwind. Nice to have: Node.js, GraphQL, CI/CD experience.",
+  "apply_url": "https://boards.greenhouse.io/acmecorp/jobs/12345",
+  "source": "remoteok",
+  "fetched_at": "2026-08-22T00:00:00+00:00"
+}

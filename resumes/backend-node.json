@@ -1,0 +1,82 @@
+{
+  "variant": "backend-node",
+  "summary": "Backend-leaning full-stack developer with hands-on experience building REST APIs, JWT-secured auth flows, and Node.js/MongoDB integrations, alongside production frontend delivery. Comfortable across the stack, with growing focus on API design, backend architecture, and agentic automation workflows.",
+  "experience": [
+    {
+      "company": "Stackform",
+      "role": "Frontend Developer (Freelance)",
+      "dates": "01/2026 - Present",
+      "bullets": [
+        "Use agentic coding tools (Claude Code, GitHub Copilot) under a custom AGENTS.md workflow framework to maintain consistent architecture and speed up delivery across parallel client projects.",
+        "Design and build production client web applications end-to-end using Next.js and React, managing the full lifecycle from Figma handoff through deployment on Vercel.",
+        "Independently manage client acquisition, scoping, and delivery as a solo digital agency, handling proposals through post-launch support.",
+        "Build a reusable library of niche-specific demo web applications to speed up client onboarding and delivery."
+      ]
+    },
+    {
+      "company": "GYMYAK Pvt. Ltd.",
+      "role": "Frontend Web Developer",
+      "dates": "05/2025 - 12/2025",
+      "bullets": [
+        "Integrated backend APIs built with Node.js and MongoDB into the production frontend, enabling smooth product flows and real-time updates.",
+        "Built and maintained the company's e-commerce frontend, improving page load speed by ~20% through targeted optimizations.",
+        "Collaborated with designers and backend engineers to shorten feature delivery cycles by ~15%, keeping frontend changes and backend updates fully aligned."
+      ]
+    },
+    {
+      "company": "Tenshi IT Solutions",
+      "role": "Frontend Developer Intern",
+      "dates": "12/2024 - 04/2025",
+      "bullets": [
+        "Implemented secure JWT authentication flows and reusable component patterns, reducing code duplication by ~25%.",
+        "Built scalable interfaces with React, Tailwind CSS, and Zustand, improving UI responsiveness by ~30%."
+      ]
+    }
+  ],
+  "skills": [
+    "Node.js", "Express.js", "Django", "FastAPI (basic)", "PostgreSQL", "MongoDB", "Mongoose",
+    "REST APIs", "JWT Auth", "API Rate Limiting", "Webhooks", "API Orchestration",
+    "OpenAI API", "Agentic Backend Pipelines", "n8n Automation",
+    "Docker", "GitHub Actions", "Postman", "Linux", "CI/CD",
+    "Claude Code", "GitHub Copilot", "React.js", "Zustand", "Tailwind CSS"
+  ],
+  "projects": [
+    {
+      "name": "AI SaaS Chat Bot",
+      "stack": "Node.js, Express.js, MongoDB, React, OpenAI, JWT, Material UI",
+      "bullets": [
+        "Built secure, JWT-protected backend routes that powered real-time AI conversations and ensured stable context handling.",
+        "Optimized MongoDB indexes and query patterns, enabling 2x faster data retrieval during high-traffic sessions.",
+        "Added schema validation and strict access control, blocking 95%+ malformed or unauthorized requests.",
+        "Designed role-based logic and structured message pipelines that improved LLM reasoning accuracy and response predictability."
+      ]
+    },
+    {
+      "name": "BidCopy",
+      "stack": "Next.js, Supabase, Clerk, Razorpay, Gemini API, Claude API",
+      "bullets": [
+        "Built the backend for an AI-powered bid-proposal SaaS product, using Supabase as the primary data layer and Clerk for authentication.",
+        "Designed a freemium usage model with tiered AI routing - Gemini for the free tier, Claude Sonnet for paid users - balancing cost and output quality.",
+        "Integrated Razorpay for subscription billing and usage-based plan upgrades.",
+        "Built a companion Chrome Extension that calls the core API for in-context proposal generation directly from bid listing pages."
+      ]
+    },
+    {
+      "name": "Linkify",
+      "stack": "React, Node.js, Express, MongoDB, Socket.io, OpenAI, Material UI",
+      "bullets": [
+        "Integrated real-time bi-directional messaging using Socket.io with sub-200ms latency, improving reliability during peak traffic.",
+        "Developed a high-performance chat UI with Tailwind CSS + Zustand, achieving a 30% reduction in state-related overhead.",
+        "Automated builds and deployments with a CI/CD workflow, enabling zero-downtime releases and faster production cycles."
+      ]
+    }
+  ],
+  "education": [
+    "MCA, Vellore Institute of Technology, Bhopal - CGPA: 9.03 (07/2023 - 07/2025)",
+    "BCA, JECRC University, Jaipur - CGPA: 8.20 (07/2019 - 07/2022)"
+  ],
+  "certifications": [
+    "Oracle Certified Generative AI Professional (OCI 2025)",
+    "Oracle Certified AI Foundations Associate (OCI 2025)"
+  ]
+}
