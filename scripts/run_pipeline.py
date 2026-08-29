@@ -41,7 +41,23 @@ def main():
         company = jd.get("company", "Unknown Company")
         logger.info(f"--- Processing [{i+1}/{len(jds)}]: {title} at {company} ---")
         
+        # 1.5 Check ATS compatibility early to save LLM tokens
+        apply_url = jd.get("apply_url", "")
+        if "greenhouse.io" not in apply_url and "lever.co" not in apply_url and "workday" not in apply_url.lower() and "ashby" not in apply_url.lower():
+            logger.warning(f"Unsupported ATS or apply URL for '{title}' at '{company}': {apply_url}")
+            log_result(
+                jd=jd,
+                score=0,
+                variant_used="N/A",
+                status="skipped_unsupported_ats",
+                pdf_path="",
+                notes="Skipped before scoring due to unsupported ATS."
+            )
+            continue
+            
         # 2. Score
+        logger.info(f"Scoring JD...")
+        time.sleep(3) # Small delay before scoring to help with rate limits
         try:
             score_result = score_and_pick(jd)
         except Exception as e:
@@ -54,24 +70,18 @@ def main():
         
         if score < 65:
             logger.info(f"Skipping JD: Score {score} is below threshold 65.")
-            continue
-            
-        logger.info(f"JD passed with score {score} using variant '{best_variant}'.")
-        
-        # Check ATS compatibility early to save LLM tokens
-        apply_url = jd.get("apply_url", "")
-        if "greenhouse.io" not in apply_url and "lever.co" not in apply_url and "workday" not in apply_url.lower() and "ashby" not in apply_url.lower():
-            logger.warning(f"Unsupported ATS or apply URL for '{title}' at '{company}': {apply_url}")
             log_result(
                 jd=jd,
                 score=score,
                 variant_used=best_variant,
-                status="skipped_unsupported_ats",
+                status="skipped_low_score",
                 pdf_path="",
                 notes=reasoning[:200]
             )
-            time.sleep(5)  # Rate limit protection
+            time.sleep(5)
             continue
+            
+        logger.info(f"JD passed with score {score} using variant '{best_variant}'.")
             
         # 3. Tailor
         logger.info(f"Tailoring resume variant '{best_variant}'...")

@@ -151,6 +151,7 @@ def score_and_pick(jd: dict) -> dict:
     best_score = -1
     best_result = {}
 
+    import time
     for name, variant_data in variants.items():
         logger.info("Scoring JD against variant: %s", name)
         res = score_jd_against_variant(jd, variant_data)
@@ -158,6 +159,7 @@ def score_and_pick(jd: dict) -> dict:
             best_score = res["score"]
             best_variant_name = name
             best_result = res
+        time.sleep(2)  # Delay between scoring variants to respect rate limits
     
     final_result = {
         "jd_id": f"{jd.get('company', '')}_{jd.get('title', '')}".replace(" ", "_").lower(),
