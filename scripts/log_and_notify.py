@@ -83,6 +83,22 @@ def append_row(row: dict) -> None:
     sheet.append_row(row_values)
     logger.info("Successfully appended row %s to Google Sheet", row.get("run_id"))
 
+def get_processed_urls() -> set[str]:
+    """
+    Fetch all previously processed apply_urls from the Google Sheet.
+    Returns an empty set if credentials are missing or an error occurs.
+    """
+    try:
+        sheet = _get_sheet()
+        # apply_url is the 10th column (1-indexed in gspread)
+        urls = sheet.col_values(10)
+        # Filter out the header "apply_url" and empty strings
+        return set(u.strip() for u in urls if u.strip() and u.strip() != "apply_url")
+    except Exception as e:
+        logger.warning("Failed to fetch processed URLs from Google Sheets: %s", e)
+        return set()
+
+
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@
 | 7 | `log_and_notify.py` | ✅ Done | 2026-08-29 |
 | 8 | `auto_apply_ats.py` | ✅ Done | 2026-08-29 |
 | 9 | CI/CD pipeline | ✅ Done | 2026-08-29 |
-| 10 | Hardening | ⬜ Not started | — |
+| 10 | Hardening | ✅ Done | 2026-08-29 |
 
 **Legend:** ⬜ Not started · 🔄 In progress · ✅ Done · 🚫 Blocked
 
@@ -233,17 +233,17 @@ _Depends on all prior checkpoints being complete._
 **Goal:** Make the pipeline production-grade: robust deduplication, retry logic on transient
 failures, comprehensive dry-run, and selector regression tests.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done — 2026-08-29
 
 ### Sub-tasks
-- [ ] Implement persistent deduplication store (SQLite or Sheets-backed seen-set) so previously
+- [x] Implement persistent deduplication store (SQLite or Sheets-backed seen-set) so previously
       scored JDs are not re-processed across runs
-- [ ] Add retry logic (exponential backoff, max 3 attempts) on Groq API calls
-- [ ] Add retry on Playwright network errors for scraper functions
-- [ ] Write fixture-based tests for `score_and_pick.py` (no live network calls)
-- [ ] Write selector smoke tests for each scraper (flag if selector returns 0 results)
-- [ ] Document operational runbook: how to re-run a failed JD, how to update a broken selector
-- [ ] Update `Agents.md` status table when done
+- [x] Add retry logic (exponential backoff, max 3 attempts) on Groq API calls
+- [x] Add retry on Playwright network errors for scraper functions
+- [x] Write fixture-based tests for `score_and_pick.py` (no live network calls)
+- [x] Write selector smoke tests for each scraper (flag if selector returns 0 results)
+- [x] Document operational runbook: how to re-run a failed JD, how to update a broken selector
+- [x] Update `Agents.md` status table when done
 
 ### Blockers
 _Depends on Checkpoint 9 (CI/CD) being complete._
@@ -263,6 +263,8 @@ _None yet._
 | 2026-08-29 | Checkpoint 6 complete. Built minimalist HTML/CSS template and `render_pdf.py` via Weasyprint. | Ready for Checkpoint 7 (`log_and_notify.py`). |
 | 2026-08-29 | Checkpoint 7 complete. Built `log_and_notify.py` with gspread and telegram. Handles missing credentials gracefully. | Ready for Checkpoint 8 (`auto_apply_ats.py`). |
 | 2026-08-29 | Checkpoint 8 complete. Built Playwright automation for Greenhouse and Lever in `auto_apply_ats.py`. | Ready for Checkpoint 9 (CI/CD pipeline). |
+| 2026-08-29 | Checkpoint 9 complete. CI/CD Pipeline implemented. | Ready for Checkpoint 10. |
+| 2026-08-29 | Checkpoint 10 complete. Hardening applied (Deduplication, Retries, Tests, Runbook). | Pipeline is production-ready. |
 
 ---
 

@@ -37,6 +37,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -119,6 +120,11 @@ def _jd(
 
 # ── API sources ───────────────────────────────────────────────────────────────
 
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
 def fetch_remoteok() -> list[dict]:
     """Fetch listings from RemoteOK JSON API. No browser required.
     Selector version: N/A (JSON API).
@@ -162,6 +168,11 @@ def fetch_remoteok() -> list[dict]:
     return listings
 
 
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
 def fetch_remotive() -> list[dict]:
     """Fetch listings from Remotive JSON API. No browser required.
     Selector version: N/A (JSON API).
@@ -202,6 +213,11 @@ def fetch_remotive() -> list[dict]:
     return listings
 
 
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
 def fetch_himalayas() -> list[dict]:
     """Fetch listings from Himalayas JSON API. No browser required."""
     resp = requests.get(
@@ -238,6 +254,11 @@ def fetch_himalayas() -> list[dict]:
     return listings
 
 
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
 def fetch_arbeitnow() -> list[dict]:
     """Fetch listings from Arbeitnow JSON API. No browser required."""
     resp = requests.get(
@@ -304,8 +325,20 @@ def fetch_all() -> list[dict]:
                 logger.error("fetch:%s — error: %s", name, exc, exc_info=True)
 
     deduped = _dedup(all_listings)
+    
+    # Filter against persistent store (Google Sheets)
+    try:
+        from scripts.log_and_notify import get_processed_urls
+        processed_urls = get_processed_urls()
+        if processed_urls:
+            before_len = len(deduped)
+            deduped = [jd for jd in deduped if jd.get("apply_url") not in processed_urls]
+            logger.info("fetch_all — filtered out %d already processed URLs", before_len - len(deduped))
+    except ImportError:
+        pass
+        
     logger.info(
-        "fetch_all — %d total → %d unique after dedup",
+        "fetch_all — %d total → %d final after dedup and persistent filter",
         len(all_listings),
         len(deduped),
     )

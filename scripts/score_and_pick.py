@@ -24,8 +24,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
-from groq import Groq
+from typing import Any, TYPE_CHECKING
+from groq import Groq, GroqError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from dotenv import load_dotenv
 
@@ -53,13 +54,19 @@ def load_all_variants() -> dict[str, dict]:
 
 # ── Groq scoring ──────────────────────────────────────────────────────────────
 
-def score_jd_against_variant(jd: dict, variant: dict) -> dict:
+client = Groq()
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(GroqError)
+)
+def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     """
     Call Groq to score a single (JD, variant) pair.
     Returns partial Score result: {score, missing_skills, reasoning}.
     Model: llama-3.3-70b-versatile
     """
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
     prompt = f"""
     You are an expert technical recruiter scoring a job description against a candidate's resume.
     
@@ -76,8 +83,9 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict:
     - "reasoning": a brief explanation of the score and missing skills.
     """
     try:
+        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model=model_name,
             messages=[
                 {"role": "system", "content": "You output JSON only."},
                 {"role": "user", "content": prompt},

@@ -15,6 +15,7 @@ jinja2==3.1.4                # Resume HTML template rendering
 
 # ── HTTP / scraping helpers ───────────────────────────────────────────────────
 requests==2.32.3             # JSON API fetches (RemoteOK, Remotive)
+tenacity==8.3.0              # Retry logic with exponential backoff
 beautifulsoup4==4.12.3       # HTML parsing fallback
 lxml==5.2.2                  # Fast XML/HTML parser for bs4
 

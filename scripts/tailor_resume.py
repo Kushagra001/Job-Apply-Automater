@@ -27,7 +27,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from groq import Groq
+from typing import Any
+from groq import Groq, GroqError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from dotenv import load_dotenv
 
@@ -81,13 +83,18 @@ def validate_tailored(original: dict, tailored: dict) -> None:
 
 # ── Groq tailoring ────────────────────────────────────────────────────────────
 
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(GroqError)
+)
 def tailor_resume(variant_json: dict, jd: dict) -> dict:
     """
     Return a tailored deep copy of variant_json optimised for jd.
     Never mutates variant_json.
     Model: llama-3.3-70b-versatile
     """
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    client = Groq()
     
     prompt = f"""
     You are an expert technical resume writer. You must tailor the provided resume to the provided job description.
@@ -108,8 +115,9 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     """
     
     try:
+        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model=model_name,
             messages=[
                 {"role": "system", "content": "You output JSON only. Adhere strictly to the schema and anti-hallucination rules."},
                 {"role": "user", "content": prompt},
