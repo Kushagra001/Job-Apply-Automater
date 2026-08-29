@@ -28,7 +28,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
-from groq import Groq, GroqError
+from groq import Groq, GroqError, RateLimitError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from dotenv import load_dotenv
@@ -83,6 +83,14 @@ def validate_tailored(original: dict, tailored: dict) -> None:
 
 # ── Groq tailoring ────────────────────────────────────────────────────────────
 
+FALLBACK_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+    "llama-3.1-8b-instant"
+]
+_CURRENT_MODEL_INDEX = 0
+
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=10),
     stop=stop_after_attempt(3),
@@ -114,26 +122,49 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     {json.dumps(variant_json, indent=2)}
     """
     
-    try:
-        model_name = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": "You output JSON only. Adhere strictly to the schema and anti-hallucination rules."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        tailored = json.loads(response.choices[0].message.content)
-        validate_tailored(variant_json, tailored)
-        return tailored
-    except ValueError as ve:
-        logger.error("Validation failed: %s. Returning original variant.", ve)
+    global _CURRENT_MODEL_INDEX
+    last_error = None
+    
+    for _ in range(len(FALLBACK_MODELS)):
+        model_name = os.environ.get("GROQ_MODEL")
+        if not model_name:
+            model_name = FALLBACK_MODELS[_CURRENT_MODEL_INDEX]
+            
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You output JSON only. Adhere strictly to the schema and anti-hallucination rules."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            tailored = json.loads(response.choices[0].message.content)
+            validate_tailored(variant_json, tailored)
+            return tailored
+        except RateLimitError as e:
+            logger.warning("Rate limit hit for model %s: %s", model_name, e)
+            last_error = e
+            if os.environ.get("GROQ_MODEL"):
+                raise e  # If user explicitly forced a model, don't fall back
+                
+            _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
+            logger.info("Switched to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
+        except ValueError as ve:
+            logger.error("Validation failed: %s. Returning original variant.", ve)
+            return copy.deepcopy(variant_json)
+        except Exception as e:
+            logger.error("Groq API call failed: %s", e)
+            return copy.deepcopy(variant_json)
+
+    if last_error:
+        # We only throw if validation didn't already return deepcopy, or if all fallbacks failed.
+        # But wait, original code returned deepcopy on ANY Exception. 
+        # Let's return deepcopy if all models fail due to RateLimit.
+        logger.error("All fallback models exhausted due to rate limits.")
         return copy.deepcopy(variant_json)
-    except Exception as e:
-        logger.error("Groq API call failed: %s", e)
-        return copy.deepcopy(variant_json)
+
 
 
 
