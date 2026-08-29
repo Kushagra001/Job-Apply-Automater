@@ -65,7 +65,7 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     """
     Call Groq to score a single (JD, variant) pair.
     Returns partial Score result: {score, missing_skills, reasoning}.
-    Model: llama-3.3-70b-versatile
+    Model: openai/gpt-oss-120b
     """
     prompt = f"""
     You are an expert technical recruiter scoring a job description against a candidate's resume.
@@ -83,7 +83,7 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     - "reasoning": a brief explanation of the score and missing skills.
     """
     try:
-        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        model_name = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
         response = client.chat.completions.create(
             model=model_name,
             messages=[

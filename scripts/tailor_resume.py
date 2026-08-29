@@ -115,7 +115,7 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     """
     
     try:
-        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        model_name = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
         response = client.chat.completions.create(
             model=model_name,
             messages=[
