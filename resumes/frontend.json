@@ -1,5 +1,14 @@
 {
   "variant": "frontend",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
   "summary": "Frontend Developer skilled in building fast, responsive, user-centric web apps using React, Next.js, TypeScript, and Tailwind CSS. Experienced translating Figma designs into production-ready interfaces and integrating REST APIs, with full-stack comfort across Node.js and MongoDB.",
   "experience": [
     {

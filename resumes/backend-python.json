@@ -1,5 +1,14 @@
 {
   "variant": "backend-python",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
   "summary": "Backend developer comfortable across Node.js and Python, with experience building REST APIs, JWT-secured auth, Django/PostgreSQL services, and AI-assisted automation pipelines. Full-stack delivery experience from production frontend work, with growing focus on backend architecture and agentic automation workflows using OpenAI and n8n.",
   "experience": [
     {

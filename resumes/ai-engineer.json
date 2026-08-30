@@ -1,5 +1,14 @@
 {
   "variant": "ai-engineer",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
   "summary": "AI-focused full-stack developer building agentic, LLM-powered applications and automation pipelines - from AI-routed SaaS products to autonomous job-search and outreach systems. Comfortable across the stack (Next.js/React, Node.js, Python), with hands-on experience integrating OpenAI, Groq, and Claude into production workflows using agentic coding tools and orchestration frameworks like n8n and GitHub Actions.",
   "experience": [
     {

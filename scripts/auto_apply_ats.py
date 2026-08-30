@@ -7,10 +7,9 @@ apply_url domain and routes to the appropriate flow.
 Supported ATS platforms:
   Domain               | Flow
   ---------------------|------------------
-  greenhouse.io        | Greenhouse
-  lever.co             | Lever
-  myworkdayjobs.com    | Workday
-  ashbyhq.com          | Ashby
+  boards.greenhouse.io | Greenhouse
+  jobs.lever.co        | Lever
+  jobs.ashbyhq.com     | Ashby
 
 Non-negotiable rules (from Agents.md):
   - ONLY fill forms on the above ATS platforms.
@@ -41,6 +40,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 SELECTOR_TIMEOUT_MS = 15_000  # 15 s hard limit on every Playwright selector wait
+# Fix #14: page loads on ATS sites can take 30-45s; separate timeout from selector waits
+PAGE_LOAD_TIMEOUT_MS = 45_000  # 45 s for full page navigation
 
 USER_PROFILE = {
     "first_name": "Kushagra",
@@ -48,9 +49,9 @@ USER_PROFILE = {
     "full_name": "Kushagra Singh Negi",
     "email": "kushagrasinghnegi9@gmail.com",
     "phone": "9521693663",
-    "linkedin": "https://linkedin.com",
-    "github": "https://github.com",
-    "portfolio": "https://portfolio.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/",
 }
 
 
@@ -67,10 +68,11 @@ class UnsupportedATSError(Exception):
 # ── ATS detection ─────────────────────────────────────────────────────────────
 
 _ATS_DOMAIN_MAP = {
-    "greenhouse.io": "greenhouse",
-    "lever.co": "lever",
-    "myworkdayjobs.com": "workday",
-    "ashbyhq.com": "ashby",
+    "greenhouse.io":       "greenhouse",
+    "lever.co":            "lever",
+    "ashbyhq.com":         "ashby",
+    "remotive.com":        "remotive",
+    "remoteok.com":        "remoteok",
 }
 
 
@@ -156,23 +158,139 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     return True
 
 
-def _apply_workday(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
-    """Fill and optionally submit a Workday application form."""
-    # TODO: implement
-    raise NotImplementedError("Workday flow not yet implemented")
-
-
 def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     """Fill and optionally submit an Ashby application form."""
-    # TODO: implement
-    raise NotImplementedError("Ashby flow not yet implemented")
+    logger.info("Starting Ashby flow...")
+    
+    # Ashby sometimes has an "Apply for this job" button before the form
+    apply_btn = page.locator('button:has-text("Apply for this job"), a:has-text("Apply for this job")')
+    if apply_btn.count() > 0 and apply_btn.first.is_visible():
+        apply_btn.first.click()
+        
+    page.wait_for_selector('input[name="name"]', timeout=SELECTOR_TIMEOUT_MS)
+    
+    page.fill('input[name="name"]', USER_PROFILE["full_name"])
+    page.fill('input[name="email"]', USER_PROFILE["email"])
+    
+    phone_input = page.locator('input[name="phone"]')
+    if phone_input.count() > 0:
+        phone_input.fill(USER_PROFILE["phone"])
+        
+    resume_input = page.locator('input[type="file"]')
+    if resume_input.count() > 0:
+        resume_input.first.set_input_files(pdf_path)
+        
+    # Check for common social fields
+    linkedin_input = page.locator('input[name*="linkedin" i]')
+    if linkedin_input.count() > 0:
+        linkedin_input.fill(USER_PROFILE["linkedin"])
+        
+    github_input = page.locator('input[name*="github" i]')
+    if github_input.count() > 0:
+        github_input.fill(USER_PROFILE["github"])
+        
+    portfolio_input = page.locator('input[name*="portfolio" i], input[name*="website" i]')
+    if portfolio_input.count() > 0:
+        portfolio_input.fill(USER_PROFILE["portfolio"])
+        
+    if not dry_run:
+        logger.info("Submitting Ashby application...")
+        # Ashby submit buttons usually say "Submit Application"
+        page.click('button[type="submit"]')
+        page.wait_for_load_state('networkidle')
+    else:
+        logger.info("--dry-run: Skipped submit click.")
+        
+    return True
+
+
+
+def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+    """
+    Remotive listing pages show a 'Apply for this job' button that either:
+      a) opens a modal with an embedded ATS form, or
+      b) redirects to the company's own ATS page (greenhouse/lever).
+    We click the button, wait for navigation, then re-detect the ATS.
+    """
+    logger.info("Starting Remotive flow...")
+
+    # Click the primary apply button
+    apply_btn = page.locator('a.apply-button, a[data-ga-label="apply"], a:has-text("Apply for this job")')
+    if apply_btn.count() == 0:
+        logger.warning("Remotive: no apply button found — skipping")
+        return False
+
+    with page.expect_popup() as popup_info:
+        apply_btn.first.click()
+    new_page = popup_info.value
+    new_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    # Re-detect ATS on the new page
+    try:
+        ats_name = detect_ats(new_page.url)
+    except UnsupportedATSError:
+        logger.warning("Remotive redirect did not land on a supported ATS: %s", new_page.url)
+        new_page.close()
+        return False
+
+    logger.info("Remotive redirected to ATS: %s", ats_name)
+    flow_fn = _ATS_FLOW_MAP.get(ats_name)
+    if not flow_fn or ats_name in ("remotive", "remoteok"):
+        logger.warning("No nested flow for ATS '%s'", ats_name)
+        new_page.close()
+        return False
+
+    try:
+        result = flow_fn(new_page, jd, pdf_path, dry_run)
+    finally:
+        new_page.close()
+    return result
+
+
+def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+    """
+    RemoteOK listing pages have an 'Apply Now' button that redirects to the
+    company's ATS. We click it and re-detect the ATS on the resulting page.
+    """
+    logger.info("Starting RemoteOK flow...")
+
+    apply_btn = page.locator('a.button-apply, a:has-text("Apply Now"), a:has-text("Apply")')
+    if apply_btn.count() == 0:
+        logger.warning("RemoteOK: no apply button found — skipping")
+        return False
+
+    with page.expect_popup() as popup_info:
+        apply_btn.first.click()
+    new_page = popup_info.value
+    new_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(new_page.url)
+    except UnsupportedATSError:
+        logger.warning("RemoteOK redirect did not land on a supported ATS: %s", new_page.url)
+        new_page.close()
+        return False
+
+    logger.info("RemoteOK redirected to ATS: %s", ats_name)
+    flow_fn = _ATS_FLOW_MAP.get(ats_name)
+    if not flow_fn or ats_name in ("remotive", "remoteok"):
+        logger.warning("No nested flow for ATS '%s'", ats_name)
+        new_page.close()
+        return False
+
+    try:
+        result = flow_fn(new_page, jd, pdf_path, dry_run)
+    finally:
+        new_page.close()
+    return result
 
 
 _ATS_FLOW_MAP = {
     "greenhouse": _apply_greenhouse,
-    "lever": _apply_lever,
-    "workday": _apply_workday,
-    "ashby": _apply_ashby,
+    "lever":      _apply_lever,
+    "ashby":      _apply_ashby,
+    "remotive":   _apply_remotive,
+    "remoteok":   _apply_remoteok,
 }
 
 
@@ -194,27 +312,33 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> bool:
     if not apply_url:
         logger.error("No apply_url provided in JD.")
         return False
-        
+
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
-            
+
             logger.info("Navigating to %s", apply_url)
-            page.goto(apply_url, wait_until="domcontentloaded", timeout=SELECTOR_TIMEOUT_MS)
-            
+            # Fix #14: use the longer PAGE_LOAD_TIMEOUT_MS for page navigation
+            page.goto(apply_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
             try:
                 ats_name = detect_ats(page.url)
             except UnsupportedATSError as e:
                 logger.warning(str(e))
                 return False
-                
+
             logger.info("Detected ATS: %s", ats_name)
             flow_fn = _ATS_FLOW_MAP[ats_name]
-            
+
             try:
                 return flow_fn(page, jd, pdf_path, dry_run)
+            except NotImplementedError as e:
+                # Fix #4: Workday/Ashby raise NotImplementedError — surface it clearly
+                # instead of letting the outer except swallow it as a generic failure.
+                logger.warning("ATS flow not implemented for '%s': %s", ats_name, e)
+                return False
             except PlaywrightTimeoutError as e:
                 raise ATSTimeoutError(f"Timeout filling {ats_name} form: {e}")
             finally:

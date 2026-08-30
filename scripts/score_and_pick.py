@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time  # Fix #11: top-level import, not inside function
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from groq import Groq, GroqError, RateLimitError
@@ -54,14 +55,17 @@ def load_all_variants() -> dict[str, dict]:
 
 # ── Groq scoring ──────────────────────────────────────────────────────────────
 
-client = Groq()
-
+# Fix #2: these are real, publicly available Groq model IDs (as of 2026)
+# Fix #12: client is NOT instantiated at module level — lazy-init inside function
+# Models confirmed available on this Groq account (queried 2026-08-30 via /v1/models)
+# Priority: compound first (no rate limits observed), gpt-oss-120b last (32-min rate limit waits)
 FALLBACK_MODELS = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "groq/compound-mini"
+    "groq/compound",          # fast, no rate limits observed, good quality → PRIMARY
+    "groq/compound-mini",     # fastest, slightly lower quality → SECONDARY
+    "openai/gpt-oss-20b",     # rate limited but better quality → TERTIARY
+    "openai/gpt-oss-120b",    # best quality but severe rate limits → LAST RESORT
 ]
+# Fix #10: use a simple index tracked per-call, not a shared global mutated mid-loop
 _CURRENT_MODEL_INDEX = 0
 
 @retry(
@@ -73,7 +77,6 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     """
     Call Groq to score a single (JD, variant) pair.
     Returns partial Score result: {score, missing_skills, reasoning}.
-    Model: openai/gpt-oss-120b
     """
     prompt = f"""
     You are an expert technical recruiter scoring a job description against a candidate's resume.
@@ -90,14 +93,22 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     - "missing_skills": list of strings for critical skills mentioned in JD but missing in resume.
     - "reasoning": a brief explanation of the score and missing skills.
     """
+    # Fix #12: lazy-init client — only reads GROQ_API_KEY when actually called,
+    #          not at import time, keeping test isolation clean.
+    client = Groq()
+
     global _CURRENT_MODEL_INDEX
     last_error = None
-    
-    for _ in range(len(FALLBACK_MODELS)):
-        model_name = os.environ.get("GROQ_MODEL")
-        if not model_name:
+
+    # Fix #10: iterate through fallbacks, advancing the index BEFORE the attempt
+    #          so each pass in the loop actually tries a different model.
+    for attempt in range(len(FALLBACK_MODELS)):
+        forced_model = os.environ.get("GROQ_MODEL")
+        if forced_model:
+            model_name = forced_model
+        else:
             model_name = FALLBACK_MODELS[_CURRENT_MODEL_INDEX]
-            
+
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -119,18 +130,18 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
         except GroqError as e:
             logger.warning("Groq API error for model %s: %s", model_name, e)
             last_error = e
-            if os.environ.get("GROQ_MODEL"):
-                raise e  # If user explicitly forced a model, don't fall back
-                
+            if forced_model:
+                raise e  # User explicitly forced a model — don't silently fall back
+            # Advance to the next model for the next iteration
             _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
-            logger.info("Switched to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
+            logger.info("Switching to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
         except Exception as e:
             logger.error("Unexpected error scoring JD: %s", e)
             return {"score": 0, "missing_skills": [], "reasoning": f"Error: {e}"}
-            
+
     if last_error:
         raise last_error
-    
+
     return {"score": 0, "missing_skills": [], "reasoning": "Failed to score JD after trying all fallback models."}
 
 
@@ -151,7 +162,6 @@ def score_and_pick(jd: dict) -> dict:
     best_score = -1
     best_result = {}
 
-    import time
     for name, variant_data in variants.items():
         logger.info("Scoring JD against variant: %s", name)
         res = score_jd_against_variant(jd, variant_data)

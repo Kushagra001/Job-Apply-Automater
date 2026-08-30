@@ -85,8 +85,8 @@ a deduplicated list ready for scoring.
 - [x] Implement `fetch_wwr()` — Removed in favor of APIs
 - [x] Implement `fetch_wellfound()` — Removed in favor of APIs
 - [x] Implement `fetch_naukri()` — Removed in favor of APIs
-- [x] Implement `fetch_himalayas()` — JSON API
-- [x] Implement `fetch_arbeitnow()` — JSON API
+- [x] Implement `fetch_himalayas()` — Removed in favor of APIs
+- [x] Implement `fetch_arbeitnow()` — Removed in favor of APIs
 - [x] Implement deduplication by normalized `(company, title)` across sources
 - [x] Manual smoke test: APIs tested successfully without browser overhead.
 - [x] Update `Agents.md` status table when done
@@ -196,7 +196,7 @@ _None yet._
 
 ## Checkpoint 8 — `auto_apply_ats.py`
 
-**Goal:** Playwright-driven ATS form filler for Greenhouse, Lever, Workday, and Ashby.
+**Goal:** Playwright-driven ATS form filler for Greenhouse, Lever, and Ashby.
 Must support `--dry-run` (fill but do not submit).
 
 **Status:** ⬜ Not started

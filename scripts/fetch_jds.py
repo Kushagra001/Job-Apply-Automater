@@ -6,11 +6,19 @@ canonical JD schema defined in Agents.md, and returns a deduplicated list.
 
 Sources
 -------
-API (no browser required):
-  - RemoteOK   — https://remoteok.com/api
-  - Remotive    — https://remotive.com/api/remote-jobs
-  - Himalayas   — https://himalayas.app/jobs/api
-  - Arbeitnow   — https://arbeitnow.com/api/job-board-api
+Native ATS APIs (direct apply_url — no redirect required):
+  - Greenhouse  — boards-api.greenhouse.io/v1/boards/{company}/jobs
+  - Lever       — api.lever.co/v0/postings/{company}?mode=json
+
+Aggregator APIs (broad coverage, filtered by keyword):
+  - RemoteOK    — https://remoteok.com/api
+  - Remotive    — https://remotive.com/api/remote-jobs?category=software-dev
+
+Job Relevance Filter
+---------------------
+All listings pass through _is_tech_job(title) before entering the pipeline.
+Only titles containing at least one keyword from TECH_TITLE_KEYWORDS are kept.
+This prevents Handyman, Gardener, Courier, etc. from clogging the pipeline.
 
 Output schema per listing:
   {
@@ -20,11 +28,11 @@ Output schema per listing:
     "remote":     bool,
     "description": str,
     "apply_url":  str,
-    "source":     "remoteok | remotive | himalayas | arbeitnow",
+    "source":     str,
     "fetched_at": ISO8601 str
   }
 
-Deduplication key: normalized (company.lower().strip(), title.lower().strip())
+Deduplication key: apply_url (primary), then (company, title) (fallback)
 """
 
 from __future__ import annotations
@@ -44,14 +52,11 @@ logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-REMOTEOK_URL = "https://remoteok.com/api"
-REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
-HIMALAYAS_URL = "https://himalayas.app/jobs/api"
-ARBEITNOW_URL = "https://arbeitnow.com/api/job-board-api"
-REMOTEOK_LIMIT = 100          # max listings per fetch
-REMOTIVE_LIMIT = 100
-HIMALAYAS_LIMIT = 100
-ARBEITNOW_LIMIT = 100
+REMOTEOK_URL  = "https://remoteok.com/api"
+REMOTIVE_URL  = "https://remotive.com/api/remote-jobs"
+REMOTEOK_LIMIT  = 150
+REMOTIVE_LIMIT  = 150
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -59,6 +64,85 @@ HEADERS = {
         "Chrome/125.0.0.0 Safari/537.36"
     )
 }
+
+# ── ATS native sources — curated company lists ────────────────────────────────
+# These boards return direct greenhouse.io / lever.co apply URLs.
+# Add or remove companies freely — one bad slug just logs a warning and continues.
+
+GREENHOUSE_COMPANIES = [
+    # Dev tools / infra (always hiring engineers)
+    "vercel", "supabase", "planetscale", "railway", "neon",
+    "liveblocks", "resend", "trigger", "clerk", "upstash",
+    "grafana", "postman", "snyk", "sentry", "hasura",
+
+    # Product / SaaS (strong eng culture, remote-friendly)
+    "linear", "loom", "notion", "coda", "retool",
+    "airtable", "miro", "front", "intercom", "superhuman",
+    "descript", "mercury", "rippling", "lattice", "brex",
+
+    # AI / LLM companies (hiring engineers not just researchers)
+    "cohere", "replicate", "modal-labs", "runway",
+    "together", "weights-biases", "langchain",
+
+    # High-velocity startups (good source of mid-level roles)
+    "cal-com", "papercups", "rows", "pitch", "dovetail",
+    "tally", "typeform", "pipefy", "questdb", "highlight",
+    "inngest", "trigger", "zuplo", "scalar",
+
+    # India-founded / India-friendly
+    "browserstack", "razorpay", "chargebee", "freshworks",
+    "learnapp", "darwinbox",
+]
+
+LEVER_COMPANIES = [
+    # Dev tools / builders
+    "webflow", "bubble", "softr", "glide", "stacker",
+    "dagger", "earthly", "depot", "buf", "temporal",
+
+    # Remote-first companies (always hire globally)
+    "remote", "deel", "oyster", "omnipresent", "papaya-global",
+
+    # AI / ML tools (engineering roles)
+    "scale-ai", "labelbox", "cleanlab", "encord",
+    "weights-and-biases",
+
+    # Product companies
+    "pitch", "rows", "dovetail", "paved",
+    "maze", "useberry", "hotjar", "survicate",
+]
+
+# ── Relevance keyword filter ───────────────────────────────────────────────────
+# A job title must contain at least one of these tokens (case-insensitive) to
+# be allowed into the pipeline. This blocks Handyman, Gardener, Courier, etc.
+
+TECH_TITLE_KEYWORDS: frozenset[str] = frozenset([
+    # Generic engineering
+    "software", "engineer", "developer", "dev", "programmer", "coder",
+    # Frontend
+    "frontend", "front-end", "front end", "react", "next", "vue", "angular",
+    "javascript", "typescript", "ui/ux", "ui engineer", "web developer",
+    # Backend
+    "backend", "back-end", "back end", "python", "node", "django", "fastapi",
+    "golang", "go ", "rust", "java ", "spring", "rails", "ruby",
+    # Full stack
+    "fullstack", "full-stack", "full stack",
+    # AI / ML / Data
+    "ai ", "ml ", "llm", "machine learning", "deep learning", "data engineer",
+    "data scientist", "nlp", "computer vision", "ai engineer",
+    # Platform / DevOps / Cloud
+    "devops", "platform", "infrastructure", "sre", "cloud", "kubernetes",
+    "docker", "devsecops", "reliability",
+    # Mobile
+    "ios", "android", "mobile", "flutter", "react native",
+    # Product / Design (close enough to be relevant)
+    "product manager", "product designer", "ux designer", "ux researcher",
+])
+
+
+def _is_tech_job(title: str) -> bool:
+    """Return True if the job title contains at least one tech keyword."""
+    t = title.lower()
+    return any(kw in t for kw in TECH_TITLE_KEYWORDS)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,17 +165,28 @@ def _is_remote(location: str) -> bool:
 
 
 def _dedup(listings: list[dict]) -> list[dict]:
-    """Remove duplicates by normalized (company, title)."""
-    seen: set[tuple[str, str]] = set()
+    """Remove duplicates by apply_url (primary) then normalized (company, title).
+
+    apply_url is a stronger key than (company, title) because many boards
+    post the same role with slightly different titles.
+    """
+    seen_urls: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
     out: list[dict] = []
     for jd in listings:
-        key = (
+        url = (jd.get("apply_url") or "").strip()
+        pair = (
             jd.get("company", "").lower().strip(),
             jd.get("title", "").lower().strip(),
         )
-        if key not in seen:
-            seen.add(key)
-            out.append(jd)
+        if url and url in seen_urls:
+            continue
+        if pair in seen_pairs:
+            continue
+        if url:
+            seen_urls.add(url)
+        seen_pairs.add(pair)
+        out.append(jd)
     return out
 
 
@@ -118,7 +213,170 @@ def _jd(
     }
 
 
-# ── API sources ───────────────────────────────────────────────────────────────
+# ── Native ATS sources ────────────────────────────────────────────────────────
+
+def fetch_greenhouse(companies: list[str] | None = None) -> list[dict]:
+    """
+    Fetch open roles from each company's Greenhouse job board.
+    Returns direct greenhouse.io apply URLs — no redirect needed.
+    A failing company board is skipped silently.
+    """
+    companies = companies or GREENHOUSE_COMPANIES
+    listings: list[dict] = []
+
+    for slug in companies:
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 404:
+                logger.debug("greenhouse: board not found for slug '%s'", slug)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            jobs = data.get("jobs", [])
+            for job in jobs:
+                title = job.get("title", "").strip()
+                if not title or not _is_tech_job(title):
+                    continue
+                # Greenhouse location block
+                loc_data = job.get("location", {})
+                location = loc_data.get("name", "") if isinstance(loc_data, dict) else str(loc_data)
+                apply_url = job.get("absolute_url", "")
+                description = _strip_html(job.get("content", ""))
+                listings.append(_jd(
+                    title=title,
+                    company=slug.replace("-", " ").title(),
+                    location=location,
+                    remote=_is_remote(location),
+                    description=description,
+                    apply_url=apply_url,
+                    source="greenhouse",
+                ))
+            logger.debug("greenhouse:%s — %d jobs", slug, len(jobs))
+        except Exception as e:
+            logger.debug("greenhouse:%s — error: %s", slug, e)
+
+    logger.info("fetch_greenhouse — %d total listings", len(listings))
+    return listings
+
+
+def fetch_lever(companies: list[str] | None = None) -> list[dict]:
+    """
+    Fetch open roles from each company's Lever job board.
+    Returns direct lever.co apply URLs — no redirect needed.
+    A failing company board is skipped silently.
+    """
+    companies = companies or LEVER_COMPANIES
+    listings: list[dict] = []
+
+    for slug in companies:
+        url = f"https://api.lever.co/v0/postings/{slug}?mode=json&limit=50"
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 404:
+                logger.debug("lever: board not found for slug '%s'", slug)
+                continue
+            resp.raise_for_status()
+            jobs = resp.json()
+            if not isinstance(jobs, list):
+                jobs = jobs.get("data", [])
+            for job in jobs:
+                title = job.get("text", "").strip()
+                if not title or not _is_tech_job(title):
+                    continue
+                categories = job.get("categories", {})
+                location = categories.get("location", "") or categories.get("commitment", "")
+                apply_url = job.get("applyUrl", "") or job.get("hostedUrl", "")
+                description = _strip_html(
+                    job.get("descriptionBody", "") or job.get("description", "")
+                )
+                listings.append(_jd(
+                    title=title,
+                    company=slug.replace("-", " ").title(),
+                    location=location,
+                    remote=_is_remote(location),
+                    description=description,
+                    apply_url=apply_url,
+                    source="lever",
+                ))
+            logger.debug("lever:%s — %d jobs", slug, len(jobs))
+        except Exception as e:
+            logger.debug("lever:%s — error: %s", slug, e)
+
+    logger.info("fetch_lever — %d total listings", len(listings))
+    return listings
+
+
+# ── Aggregator sources (keyword-filtered) ─────────────────────────────────────
+
+def fetch_hackernews() -> list[dict]:
+    """
+    Fetch comments from the latest 'Ask HN: Who is hiring?' thread and extract
+    direct links to greenhouse.io, lever.co, and ashbyhq.com.
+    """
+    listings: list[dict] = []
+    try:
+        # Get latest thread
+        url = "https://hn.algolia.com/api/v1/search_by_date"
+        params = {'tags': 'story,author_whoishiring', 'query': 'Ask HN: Who is hiring?', 'hitsPerPage': 1}
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        hits = resp.json().get("hits", [])
+        if not hits:
+            logger.warning("hackernews: no 'Who is hiring' thread found")
+            return []
+        story_id = hits[0]["objectID"]
+        
+        # Get all comments in this thread (max 1000 per Algolia limit)
+        c_url = "https://hn.algolia.com/api/v1/search"
+        c_params = {
+            'tags': f'comment,story_{story_id}',
+            'hitsPerPage': 1000
+        }
+        c_resp = requests.get(c_url, params=c_params, timeout=15)
+        c_resp.raise_for_status()
+        all_comments = c_resp.json().get("hits", [])
+        
+        # Filter comments with regex
+        ats_pattern = re.compile(r'greenhouse\.io|lever\.co|ashbyhq\.com', re.IGNORECASE)
+        comments = [c for c in all_comments if ats_pattern.search(c.get("comment_text", ""))]
+        
+        url_regex = re.compile(r'https?://[^\s<"]+')
+        
+        for comment in comments:
+            text = comment.get("comment_text", "")
+            # Basic company name extraction from the first line (typical HN format: "Company | Role | Location")
+            first_line = _strip_html(text.split("<p>")[0] if "<p>" in text else text.split("\n")[0])
+            company = first_line.split("|")[0].strip() if "|" in first_line else "HN Startup"
+            
+            # Find all URLs in the comment
+            urls = url_regex.findall(text)
+            for raw_url in urls:
+                # Strip trailing punctuation
+                clean_url = raw_url.rstrip(').,;\'">')
+                
+                # Check if it's a supported ATS
+                from scripts.auto_apply_ats import _ATS_DOMAIN_MAP
+                if any(domain in clean_url for domain in _ATS_DOMAIN_MAP.keys()):
+                    # Create a dummy title, scoring step will use the description anyway
+                    title = first_line[:100] if _is_tech_job(first_line) else "Software Engineer"
+                    
+                    listings.append(_jd(
+                        title=title,
+                        company=company,
+                        location="Remote", # Assume remote for HN jobs unless parsing better
+                        remote=True,
+                        description=_strip_html(text),
+                        apply_url=clean_url,
+                        source="hackernews",
+                    ))
+                    
+    except Exception as e:
+        logger.error("fetch_hackernews — error: %s", e)
+    
+    logger.info("fetch_hackernews — %d total listings", len(listings))
+    return listings
+
 
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -126,12 +384,8 @@ def _jd(
     retry=retry_if_exception_type(requests.RequestException)
 )
 def fetch_remoteok() -> list[dict]:
-    """Fetch listings from RemoteOK JSON API. No browser required.
-    Selector version: N/A (JSON API).
-    API field map:
-      position → title, company, location, description (HTML),
-      apply_url (= url), date
-    First element of the array is a legal/metadata object — skipped via 'slug' check.
+    """Fetch listings from RemoteOK JSON API. Keyword-filtered to tech jobs only.
+    RemoteOK sometimes provides direct ATS apply_urls — we keep whatever they give us.
     """
     resp = requests.get(
         REMOTEOK_URL,
@@ -144,26 +398,26 @@ def fetch_remoteok() -> list[dict]:
 
     listings: list[dict] = []
     for item in raw:
-        # First element is a metadata/legal object — it has no 'slug'
         if "slug" not in item:
             continue
         title = item.get("position", "").strip()
         company = item.get("company", "").strip()
         if not title or not company:
             continue
+        # Keyword filter — skip Handyman, Gardener, Courier etc.
+        if not _is_tech_job(title):
+            continue
         location = item.get("location", "") or ""
         apply_url = item.get("apply_url") or item.get("url", "")
-        listings.append(
-            _jd(
-                title=title,
-                company=company,
-                location=location,
-                remote=_is_remote(location),
-                description=item.get("description", ""),
-                apply_url=apply_url,
-                source="remoteok",
-            )
-        )
+        listings.append(_jd(
+            title=title,
+            company=company,
+            location=location,
+            remote=_is_remote(location),
+            description=item.get("description", ""),
+            apply_url=apply_url,
+            source="remoteok",
+        ))
     logger.debug("fetch_remoteok — raw=%d parsed=%d", len(raw), len(listings))
     return listings
 
@@ -174,15 +428,13 @@ def fetch_remoteok() -> list[dict]:
     retry=retry_if_exception_type(requests.RequestException)
 )
 def fetch_remotive() -> list[dict]:
-    """Fetch listings from Remotive JSON API. No browser required.
-    Selector version: N/A (JSON API).
-    API field map:
-      title, company_name, candidate_required_location, description (HTML),
-      url (= apply_url), publication_date
+    """Fetch software-dev listings from Remotive JSON API. Category-filtered at API level,
+    then keyword-filtered locally for safety.
     """
     resp = requests.get(
         REMOTIVE_URL,
-        params={"limit": REMOTIVE_LIMIT},
+        # Restrict to software dev category at the API level — reduces irrelevant results
+        params={"limit": REMOTIVE_LIMIT, "category": "software-dev"},
         headers=HEADERS,
         timeout=20,
     )
@@ -195,104 +447,21 @@ def fetch_remotive() -> list[dict]:
         title = item.get("title", "").strip()
         company = item.get("company_name", "").strip()
         if not title or not company:
+            continue
+        if not _is_tech_job(title):
             continue
         location = item.get("candidate_required_location", "") or ""
         apply_url = item.get("url", "")
-        listings.append(
-            _jd(
-                title=title,
-                company=company,
-                location=location,
-                remote=_is_remote(location),
-                description=item.get("description", ""),
-                apply_url=apply_url,
-                source="remotive",
-            )
-        )
+        listings.append(_jd(
+            title=title,
+            company=company,
+            location=location,
+            remote=_is_remote(location),
+            description=item.get("description", ""),
+            apply_url=apply_url,
+            source="remotive",
+        ))
     logger.debug("fetch_remotive — raw=%d parsed=%d", len(raw), len(listings))
-    return listings
-
-
-@retry(
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    stop=stop_after_attempt(3),
-    retry=retry_if_exception_type(requests.RequestException)
-)
-def fetch_himalayas() -> list[dict]:
-    """Fetch listings from Himalayas JSON API. No browser required."""
-    resp = requests.get(
-        HIMALAYAS_URL,
-        params={"limit": HIMALAYAS_LIMIT},
-        headers=HEADERS,
-        timeout=20,
-    )
-    resp.raise_for_status()
-    payload: dict = resp.json()
-    raw: list[dict] = payload.get("jobs", [])
-
-    listings: list[dict] = []
-    for item in raw:
-        title = item.get("title", "").strip()
-        company = item.get("companyName", "").strip()
-        if not title or not company:
-            continue
-        location = item.get("locationRestrictions", [])
-        location_str = ", ".join(location) if isinstance(location, list) else str(location)
-        apply_url = item.get("applicationLink", "")
-        listings.append(
-            _jd(
-                title=title,
-                company=company,
-                location=location_str,
-                remote=True,  # Himalayas is remote-first
-                description=item.get("description", ""),
-                apply_url=apply_url,
-                source="himalayas",
-            )
-        )
-    logger.debug("fetch_himalayas — raw=%d parsed=%d", len(raw), len(listings))
-    return listings
-
-
-@retry(
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    stop=stop_after_attempt(3),
-    retry=retry_if_exception_type(requests.RequestException)
-)
-def fetch_arbeitnow() -> list[dict]:
-    """Fetch listings from Arbeitnow JSON API. No browser required."""
-    resp = requests.get(
-        ARBEITNOW_URL,
-        headers=HEADERS,
-        timeout=20,
-    )
-    resp.raise_for_status()
-    payload: dict = resp.json()
-    raw: list[dict] = payload.get("data", [])
-
-    # The API returns all items on the first page, so we limit client-side
-    raw = raw[:ARBEITNOW_LIMIT]
-
-    listings: list[dict] = []
-    for item in raw:
-        title = item.get("title", "").strip()
-        company = item.get("company_name", "").strip()
-        if not title or not company:
-            continue
-        location = item.get("location", "") or ""
-        apply_url = item.get("url", "")
-        listings.append(
-            _jd(
-                title=title,
-                company=company,
-                location=location,
-                remote=item.get("remote", False) or _is_remote(location),
-                description=item.get("description", ""),
-                apply_url=apply_url,
-                source="arbeitnow",
-            )
-        )
-    logger.debug("fetch_arbeitnow — raw=%d parsed=%d", len(raw), len(listings))
     return listings
 
 
@@ -302,12 +471,18 @@ def fetch_all() -> list[dict]:
     """
     Run all fetch functions, collect results, and return a deduplicated list.
     A failure in one source is logged and skipped — it does not abort others.
+
+    Source priority:
+      1. Greenhouse / Lever — native ATS URLs, curated companies, tech-only
+      2. Hacker News — direct ATS URLs from "Who is Hiring" thread
+      3. RemoteOK / Remotive — broad aggregators, keyword-filtered
     """
     sources = [
+        ("greenhouse", fetch_greenhouse),
+        ("lever", fetch_lever),
+        ("hackernews", fetch_hackernews),
         ("remoteok", fetch_remoteok),
         ("remotive", fetch_remotive),
-        ("himalayas", fetch_himalayas),
-        ("arbeitnow", fetch_arbeitnow),
     ]
 
     all_listings: list[dict] = []
@@ -317,7 +492,6 @@ def fetch_all() -> list[dict]:
             logger.info("fetch:%s — got %d listings", name, len(listings))
             all_listings.extend(listings)
         except Exception as exc:
-            # Import here to avoid circular import before log_and_notify exists
             try:
                 from scripts.log_and_notify import log_failure
                 log_failure(name, exc)
@@ -325,7 +499,7 @@ def fetch_all() -> list[dict]:
                 logger.error("fetch:%s — error: %s", name, exc, exc_info=True)
 
     deduped = _dedup(all_listings)
-    
+
     # Filter against persistent store (Google Sheets)
     try:
         from scripts.log_and_notify import get_processed_urls
@@ -334,9 +508,9 @@ def fetch_all() -> list[dict]:
             before_len = len(deduped)
             deduped = [jd for jd in deduped if jd.get("apply_url") not in processed_urls]
             logger.info("fetch_all — filtered out %d already processed URLs", before_len - len(deduped))
-    except ImportError:
-        pass
-        
+    except Exception:
+        logger.warning("fetch_all — could not load processed URLs; continuing without filter")
+
     logger.info(
         "fetch_all — %d total → %d final after dedup and persistent filter",
         len(all_listings),
@@ -352,15 +526,14 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    # Optional: pass source name as arg to run a single fetcher
-    # e.g. python fetch_jds.py remoteok
     if len(sys.argv) == 2:
         source = sys.argv[1].lower()
         fn_map = {
+            "greenhouse": fetch_greenhouse,
+            "lever": fetch_lever,
+            "hackernews": fetch_hackernews,
             "remoteok": fetch_remoteok,
             "remotive": fetch_remotive,
-            "himalayas": fetch_himalayas,
-            "arbeitnow": fetch_arbeitnow,
         }
         if source not in fn_map:
             print(f"Unknown source '{source}'. Choose from: {', '.join(fn_map)}")
@@ -369,4 +542,5 @@ if __name__ == "__main__":
     else:
         results = fetch_all()
 
-    print(json.dumps(results, indent=2))
+    print(json.dumps(results[:5], indent=2))
+    print(f"\n... {len(results)} total listings")

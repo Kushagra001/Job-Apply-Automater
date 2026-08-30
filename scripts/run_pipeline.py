@@ -6,7 +6,8 @@ import logging
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.fetch_jds import fetch_all
 from scripts.score_and_pick import score_and_pick
@@ -17,6 +18,12 @@ from scripts.log_and_notify import log_result
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("run_pipeline")
+
+# Fix #1: absolute path — never relative to CWD
+RESUMES_DIR = PROJECT_ROOT / "resumes"
+
+# Fix #17: cap JDs processed per run to avoid runaway Groq spend
+MAX_JOBS_PER_RUN = int(os.environ.get("MAX_JOBS_PER_RUN", "50"))
 
 def main():
     logger.info("Starting automated job application pipeline...")
@@ -32,7 +39,12 @@ def main():
     if not jds:
         logger.info("No JDs found. Exiting.")
         return
-        
+
+    # Fix #17: cap per-run volume to control Groq token spend
+    if len(jds) > MAX_JOBS_PER_RUN:
+        logger.info(f"Capping run to {MAX_JOBS_PER_RUN} JDs (fetched {len(jds)}). Set MAX_JOBS_PER_RUN env var to change.")
+        jds = jds[:MAX_JOBS_PER_RUN]
+
     logger.info(f"Fetched {len(jds)} unique JDs. Processing...")
     
     # Process each JD
@@ -42,8 +54,13 @@ def main():
         logger.info(f"--- Processing [{i+1}/{len(jds)}]: {title} at {company} ---")
         
         # 1.5 Check ATS compatibility early to save LLM tokens
+        # Fix #3: use exact domain strings from _ATS_DOMAIN_MAP in auto_apply_ats.py
         apply_url = jd.get("apply_url", "")
-        if "greenhouse.io" not in apply_url and "lever.co" not in apply_url and "workday" not in apply_url.lower() and "ashby" not in apply_url.lower():
+        _SUPPORTED_DOMAINS = (
+            "greenhouse.io", "lever.co", "ashbyhq.com",
+            "remotive.com", "remoteok.com",  # job-board passthrough flows
+        )
+        if not any(domain in apply_url for domain in _SUPPORTED_DOMAINS):
             logger.warning(f"Unsupported ATS or apply URL for '{title}' at '{company}': {apply_url}")
             log_result(
                 jd=jd,
@@ -86,8 +103,9 @@ def main():
         # 3. Tailor
         logger.info(f"Tailoring resume variant '{best_variant}'...")
         try:
-            variant_path = Path("resumes") / f"{best_variant}.json"
-            variant_json = json.loads(variant_path.read_text())
+            # Fix #1: use absolute RESUMES_DIR, not a CWD-relative path
+            variant_path = RESUMES_DIR / f"{best_variant}.json"
+            variant_json = json.loads(variant_path.read_text(encoding="utf-8"))
             tailored = tailor_resume(variant_json, jd)
         except Exception as e:
             logger.error(f"Error tailoring resume for '{title}' at '{company}': {e}")

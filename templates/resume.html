@@ -97,30 +97,36 @@
 </head>
 <body>
 
+    {# Fix #8: contact block is now fully data-driven from resume.contact JSON field #}
     <div class="header">
-        <div class="name">Kushagra Singh Negi</div>
+        <div class="name">{{ resume.contact.full_name }}</div>
         <div class="contact">
-            Jaipur, India | +91 9521693663 | <a href="mailto:kushagrasinghnegi9@gmail.com">kushagrasinghnegi9@gmail.com</a> | <a href="https://linkedin.com">LinkedIn</a> | <a href="https://github.com">GitHub</a> | <a href="https://portfolio.com">Portfolio</a>
+            {{ resume.contact.location }}
+            {% if resume.contact.phone %} | {{ resume.contact.phone }}{% endif %}
+            {% if resume.contact.email %} | <a href="mailto:{{ resume.contact.email }}">{{ resume.contact.email }}</a>{% endif %}
+            {% if resume.contact.linkedin %} | <a href="{{ resume.contact.linkedin }}">LinkedIn</a>{% endif %}
+            {% if resume.contact.github %} | <a href="{{ resume.contact.github }}">GitHub</a>{% endif %}
+            {% if resume.contact.portfolio %} | <a href="{{ resume.contact.portfolio }}">Portfolio</a>{% endif %}
         </div>
     </div>
 
-    {% if summary %}
+    {% if resume.summary %}
     <div class="section-title">SUMMARY</div>
     <div class="content-block">
-        {{ summary }}
+        {{ resume.summary }}
     </div>
     {% endif %}
 
-    {% if skills %}
+    {% if resume.skills %}
     <div class="section-title">SKILLS</div>
     <div class="content-block">
-        {{ skills | join(', ') }}
+        {{ resume.skills | join(', ') }}
     </div>
     {% endif %}
 
-    {% if experience %}
+    {% if resume.experience %}
     <div class="section-title">EXPERIENCE</div>
-    {% for job in experience %}
+    {% for job in resume.experience %}
     <div class="content-block">
         <div class="flex-between">
             <div><span class="bold">{{ job.company }}</span> &mdash; <span class="bold">{{ job.role }}</span></div>
@@ -135,18 +141,18 @@
     {% endfor %}
     {% endif %}
 
-    {% if education %}
+    {% if resume.education %}
     <div class="section-title">EDUCATION</div>
     <div class="content-block">
-        {% for edu in education %}
+        {% for edu in resume.education %}
         <div style="margin-bottom: 2px;">{{ edu }}</div>
         {% endfor %}
     </div>
     {% endif %}
 
-    {% if projects %}
+    {% if resume.projects %}
     <div class="section-title">PROJECTS</div>
-    {% for proj in projects %}
+    {% for proj in resume.projects %}
     <div class="content-block">
         <div>
             <span class="bold">{{ proj.name }}</span> {% if proj.stack %}| <span class="italic">{{ proj.stack }}</span>{% endif %}
@@ -160,10 +166,10 @@
     {% endfor %}
     {% endif %}
 
-    {% if certifications %}
+    {% if resume.certifications %}
     <div class="section-title">CERTIFICATIONS</div>
     <div class="content-block">
-        {{ certifications | join(' | ') }}
+        {{ resume.certifications | join(' | ') }}
     </div>
     {% endif %}
 

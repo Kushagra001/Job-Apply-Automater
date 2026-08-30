@@ -46,6 +46,9 @@ SHEET_COLUMNS = [
     "score", "variant_used", "status", "pdf_path", "apply_url", "notes",
 ]
 
+# Fix #5: cache the processed-URL set so we only hit the Sheets API once per process
+_PROCESSED_URLS_CACHE: set[str] | None = None
+
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 
@@ -87,15 +90,25 @@ def get_processed_urls() -> set[str]:
     """
     Fetch all previously processed apply_urls from the Google Sheet.
     Returns an empty set if credentials are missing or an error occurs.
+
+    Fix #5: result is cached in _PROCESSED_URLS_CACHE so the Sheet is only
+    read once per Python process, not on every pipeline run.
     """
+    global _PROCESSED_URLS_CACHE
+    if _PROCESSED_URLS_CACHE is not None:
+        return _PROCESSED_URLS_CACHE
+
     try:
         sheet = _get_sheet()
         # apply_url is the 10th column (1-indexed in gspread)
         urls = sheet.col_values(10)
         # Filter out the header "apply_url" and empty strings
-        return set(u.strip() for u in urls if u.strip() and u.strip() != "apply_url")
+        _PROCESSED_URLS_CACHE = set(u.strip() for u in urls if u.strip() and u.strip() != "apply_url")
+        logger.info("Loaded %d processed URLs from Google Sheets (cached).", len(_PROCESSED_URLS_CACHE))
+        return _PROCESSED_URLS_CACHE
     except Exception as e:
         logger.warning("Failed to fetch processed URLs from Google Sheets: %s", e)
+        # Return empty set but don't populate cache — allow retry on next invocation
         return set()
 
 
@@ -139,7 +152,8 @@ def log_result(
     Log a pipeline result to Google Sheets and send a Telegram summary.
     Called by the pipeline orchestrator after each JD is processed.
     """
-    run_id = str(uuid.uuid4())[:8]
+    # Fix #16: use 12 hex chars (up from 8) to lower collision probability
+    run_id = str(uuid.uuid4())[:12]
     row = {
         "run_id": run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),

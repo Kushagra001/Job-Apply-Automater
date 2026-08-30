@@ -1,5 +1,14 @@
 {
   "variant": "backend-node",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
   "summary": "Backend-leaning full-stack developer with hands-on experience building REST APIs, JWT-secured auth flows, and Node.js/MongoDB integrations, alongside production frontend delivery. Comfortable across the stack, with growing focus on API design, backend architecture, and agentic automation workflows.",
   "experience": [
     {

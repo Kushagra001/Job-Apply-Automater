@@ -39,7 +39,7 @@ browser automation.
   (see `resumes/*.json`), never inventing skills, metrics, or roles the person hasn't done.
 - **LinkedIn/Naukri apply automation is off-limits in this repo.** Logging into Naukri/LinkedIn to submit applications from a
   CI runner is not — do not add this without an explicit, separate request.
-- **ATS-only for auto_apply_ats.py.** Only fill/submit on Greenhouse, Lever, Workday, Ashby, or
+- **ATS-only for auto_apply_ats.py.** Only fill/submit on Greenhouse, Lever, or Ashby.
   other public company-hosted application forms that don't require a pre-existing logged-in
   session tied to the user's identity.
 - **Secrets never in code.** `GROQ_API_KEY`, `GOOGLE_SA_JSON`, etc. live in GitHub Actions repo
@@ -63,7 +63,7 @@ job-pipeline/
 │   ├── score_and_pick.py            # Groq: score JD against each resume variant, pick best
 │   ├── tailor_resume.py             # Groq: re-weight bullets within the chosen variant
 │   ├── render_pdf.py                # fills the fixed template with tailored JSON
-│   ├── auto_apply_ats.py            # Playwright — Greenhouse/Lever/Workday/Ashby only
+│   ├── auto_apply_ats.py            # Playwright — Greenhouse/Lever/Ashby only
 │   └── log_and_notify.py            # Sheets append + Telegram/email ping
 └── requirements.txt
 ```
@@ -81,7 +81,7 @@ job-pipeline/
   "remote": true,
   "description": "string",
   "apply_url": "string",
-  "source": "remoteok | remotive | himalayas | arbeitnow",
+  "source": "remoteok | remotive | hackernews | greenhouse | lever | ashby",
   "fetched_at": "ISO8601"
 }
 ```
@@ -156,19 +156,19 @@ Build in this exact sequence — each stage depends on the one above it:
 1. **Repo scaffold** — create the directory tree, `requirements.txt`, and empty script stubs
 2. **Resume JSON files** — populate `resumes/frontend.json`, `backend-python.json`, `backend-node.json`,
    `ai-engineer.json` with real data (to be provided by owner)
-3. **`fetch_jds.py`** — implement API sources (RemoteOK, Remotive, Himalayas, Arbeitnow)
+3. **`fetch_jds.py`** — implement API sources (RemoteOK, Remotive)
 4. **`score_and_pick.py`** — Groq call with structured output, variant selection, threshold gate
 5. **`tailor_resume.py`** — Groq call that mutates bullet ordering/phrasing within one variant
 6. **`render_pdf.py`** — fill HTML/LaTeX template with tailored JSON, output deterministic PDF
 7. **`log_and_notify.py`** — Google Sheets append + Telegram ping; must handle offline gracefully
-8. **`auto_apply_ats.py`** — Playwright flows for each ATS (Greenhouse → Lever → Workday → Ashby)
+8. **`auto_apply_ats.py`** — Playwright flows for each ATS (Greenhouse → Lever → Ashby)
 9. **`.github/workflows/pipeline.yml`** — wire all scripts into a scheduled CI run
 10. **Hardening** — deduplication, retry logic, --dry-run flag, selector regression tests
 
 ### Per-script guidance
 
 #### `fetch_jds.py`
-- Implement `fetch_remoteok()`, `fetch_remotive()`, `fetch_himalayas()`, and `fetch_arbeitnow()` via JSON APIs (no Playwright needed).
+- Implement `fetch_remoteok()` and `fetch_remotive()` via JSON APIs (no Playwright needed).
 - All functions must return `List[dict]` matching the JD schema exactly.
 - Normalize `remote` field to a boolean; strip HTML from `description`.
 
@@ -204,7 +204,8 @@ Build in this exact sequence — each stage depends on the one above it:
 #### `auto_apply_ats.py`
 - Entry point: `apply(jd: dict, pdf_path: str) -> bool`.
 - Detect ATS from `apply_url` domain: `greenhouse.io` → Greenhouse flow, `lever.co` → Lever
-  flow, `myworkdayjobs.com` → Workday flow, `ashbyhq.com` → Ashby flow.
+  (e.g., `boards.greenhouse.io` → Greenhouse flow, `jobs.lever.co` → Lever
+  flow, `ashbyhq.com` → Ashby flow.
 - `--dry-run` flag: fill all fields but do NOT click the final submit button.
 - Every selector must have a timeout of 15 s; raise `ATSTimeoutError` on miss (caught by caller).
 - Do not add new ATS platforms without updating the detection table in this section.

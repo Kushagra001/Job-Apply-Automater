@@ -11,6 +11,12 @@ on:
         default: 'true'
         type: boolean
 
+# Fix #13: prevent overlapping runs when a previous run takes longer than 6 hours.
+# cancel-in-progress: false so a late-running job is not killed mid-application.
+concurrency:
+  group: job-pipeline
+  cancel-in-progress: false
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
@@ -28,9 +34,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
         
-      - name: Install system dependencies for WeasyPrint
-        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
-        
       - name: Install Playwright browsers
         run: playwright install chromium
         
@@ -39,5 +42,8 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          # Fix #9: Telegram secrets wired up so notify_telegram() fires in production
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: python scripts/run_pipeline.py

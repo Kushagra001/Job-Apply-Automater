@@ -10,7 +10,8 @@ gspread==6.1.2               # Sheets read/write via service account
 google-auth==2.30.0          # OAuth2 credentials for gspread
 
 # ── PDF rendering ─────────────────────────────────────────────────────────────
-weasyprint==62.3             # HTML → PDF (chosen renderer)
+# render_pdf.py uses Playwright/Chromium (already installed below) for HTML→PDF.
+# WeasyPrint was removed: it requires GTK/Pango system libs unavailable on Windows.
 jinja2==3.1.4                # Resume HTML template rendering
 
 # ── HTTP / scraping helpers ───────────────────────────────────────────────────

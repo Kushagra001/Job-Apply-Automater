@@ -47,7 +47,7 @@ def validate_tailored(original: dict, tailored: dict) -> None:
     - No new skills added.
     Raises ValueError on violation.
     """
-    required_keys = ["variant", "summary", "experience", "skills", "projects", "education", "certifications"]
+    required_keys = ["variant", "contact", "summary", "experience", "skills", "projects", "education", "certifications"]
     for key in required_keys:
         if key not in tailored:
             raise ValueError(f"Missing required key in tailored resume: {key}")
@@ -83,12 +83,15 @@ def validate_tailored(original: dict, tailored: dict) -> None:
 
 # ── Groq tailoring ────────────────────────────────────────────────────────────
 
+# Models confirmed available on this Groq account (queried 2026-08-30 via /v1/models)
+# Priority: compound first (no rate limits observed), gpt-oss-120b last (32-min rate limit waits)
 FALLBACK_MODELS = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "groq/compound-mini"
+    "groq/compound",          # fast, no rate limits observed, good quality → PRIMARY
+    "groq/compound-mini",     # fastest, slightly lower quality → SECONDARY
+    "openai/gpt-oss-20b",     # rate limited but better quality → TERTIARY
+    "openai/gpt-oss-120b",    # best quality but severe rate limits → LAST RESORT
 ]
+# Fix #10: shared global for fallback rotation (single thread — acceptable here)
 _CURRENT_MODEL_INDEX = 0
 
 @retry(
@@ -100,10 +103,10 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     """
     Return a tailored deep copy of variant_json optimised for jd.
     Never mutates variant_json.
-    Model: llama-3.3-70b-versatile
     """
+    # Fix #12: lazy-init — don't read GROQ_API_KEY at import time
     client = Groq()
-    
+
     prompt = f"""
     You are an expert technical resume writer. You must tailor the provided resume to the provided job description.
     
@@ -121,15 +124,18 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     Original Resume:
     {json.dumps(variant_json, indent=2)}
     """
-    
+
     global _CURRENT_MODEL_INDEX
     last_error = None
-    
-    for _ in range(len(FALLBACK_MODELS)):
-        model_name = os.environ.get("GROQ_MODEL")
-        if not model_name:
+
+    # Fix #10: iterate through fallbacks; advance index BEFORE each retry
+    for attempt in range(len(FALLBACK_MODELS)):
+        forced_model = os.environ.get("GROQ_MODEL")
+        if forced_model:
+            model_name = forced_model
+        else:
             model_name = FALLBACK_MODELS[_CURRENT_MODEL_INDEX]
-            
+
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -148,11 +154,11 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
         except GroqError as e:
             logger.warning("Groq API error for model %s: %s", model_name, e)
             last_error = e
-            if os.environ.get("GROQ_MODEL"):
-                raise e  # If user explicitly forced a model, don't fall back
-                
+            if forced_model:
+                raise e  # User explicitly forced a model — don't silently fall back
+            # Advance to next model for next iteration
             _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
-            logger.info("Switched to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
+            logger.info("Switching to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
         except ValueError as ve:
             logger.error("Validation failed: %s. Returning original variant.", ve)
             return copy.deepcopy(variant_json)
@@ -161,10 +167,7 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
             return copy.deepcopy(variant_json)
 
     if last_error:
-        # We only throw if validation didn't already return deepcopy, or if all fallbacks failed.
-        # But wait, original code returned deepcopy on ANY Exception. 
-        # Let's return deepcopy if all models fail due to RateLimit.
-        logger.error("All fallback models exhausted due to rate limits.")
+        logger.error("All fallback models exhausted due to rate limits. Returning original variant.")
         return copy.deepcopy(variant_json)
 
 
