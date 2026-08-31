@@ -80,11 +80,12 @@ def render_pdf(tailored_json: dict, company: str, date: str | None = None) -> st
             page.pdf(
                 path=str(output_path),
                 format="A4",
+                prefer_css_page_size=True,
                 margin={
-                    "top": "0.5in",
-                    "bottom": "0.5in",
-                    "left": "0.5in",
-                    "right": "0.5in",
+                    "top": "0in",
+                    "bottom": "0in",
+                    "left": "0in",
+                    "right": "0in",
                 },
                 print_background=True,
             )

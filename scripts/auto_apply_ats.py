@@ -93,28 +93,47 @@ def detect_ats(apply_url: str) -> str:
 def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     """Fill and optionally submit a Greenhouse application form."""
     logger.info("Starting Greenhouse flow...")
-    page.wait_for_selector("form#application-form, form#application", timeout=SELECTOR_TIMEOUT_MS)
-    
-    page.fill('input[autocomplete="given-name"], input#first_name', USER_PROFILE["first_name"])
-    page.fill('input[autocomplete="family-name"], input#last_name', USER_PROFILE["last_name"])
-    page.fill('input[autocomplete="email"], input#email', USER_PROFILE["email"])
-    page.fill('input[autocomplete="tel"], input#phone', USER_PROFILE["phone"])
-    
+
+    # Fix: broaden selector to handle both legacy id-based forms and modern
+    # React-rendered Greenhouse boards that omit the id attribute entirely.
+    page.wait_for_selector(
+        "form#application-form, form#application, form[action*='applications'], div#application",
+        timeout=SELECTOR_TIMEOUT_MS,
+    )
+
+    # Fix: page.fill() does NOT support comma-separated CSS selectors.
+    # Use locator().first so Playwright evaluates the OR and picks the first match.
+    first_name = page.locator('input[autocomplete="given-name"], input#first_name')
+    if first_name.count() > 0:
+        first_name.first.fill(USER_PROFILE["first_name"])
+
+    last_name = page.locator('input[autocomplete="family-name"], input#last_name')
+    if last_name.count() > 0:
+        last_name.first.fill(USER_PROFILE["last_name"])
+
+    email = page.locator('input[autocomplete="email"], input#email')
+    if email.count() > 0:
+        email.first.fill(USER_PROFILE["email"])
+
+    phone = page.locator('input[autocomplete="tel"], input#phone')
+    if phone.count() > 0:
+        phone.first.fill(USER_PROFILE["phone"])
+
     resume_input = page.locator('input[type="file"][data-source="resume"], input[type="file"][name="resume"]')
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
-    
-    linkedin_input = page.locator('input[autocomplete="custom-question-linkedin-profile"]')
+
+    linkedin_input = page.locator('input[autocomplete="custom-question-linkedin-profile"], input[name*="linkedin" i]')
     if linkedin_input.count() > 0:
-        linkedin_input.fill(USER_PROFILE["linkedin"])
-        
+        linkedin_input.first.fill(USER_PROFILE["linkedin"])
+
     if not dry_run:
         logger.info("Submitting Greenhouse application...")
-        page.click('button#submit_app')
+        page.click('button#submit_app, button[type="submit"]')
         page.wait_for_load_state('networkidle')
     else:
         logger.info("--dry-run: Skipped submit click.")
-        
+
     return True
 
 
@@ -296,7 +315,7 @@ _ATS_FLOW_MAP = {
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> bool:
+def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
     """
     Detect ATS and run the appropriate Playwright form-fill flow.
 
@@ -306,12 +325,13 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> bool:
         dry_run:  If True, fill fields but do not click submit
 
     Returns:
-        True on success/dry-run completion, False on handled failure.
+        (success: bool, notes: str) — notes contains the failure reason on
+        failure so the pipeline can surface it in the Google Sheet notes column.
     """
     apply_url = jd.get("apply_url")
     if not apply_url:
         logger.error("No apply_url provided in JD.")
-        return False
+        return False, "No apply_url in JD"
 
     try:
         with sync_playwright() as p:
@@ -327,25 +347,26 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> bool:
                 ats_name = detect_ats(page.url)
             except UnsupportedATSError as e:
                 logger.warning(str(e))
-                return False
+                return False, str(e)
 
             logger.info("Detected ATS: %s", ats_name)
             flow_fn = _ATS_FLOW_MAP[ats_name]
 
             try:
-                return flow_fn(page, jd, pdf_path, dry_run)
+                ok = flow_fn(page, jd, pdf_path, dry_run)
+                return ok, "" if ok else "ATS flow returned False"
             except NotImplementedError as e:
                 # Fix #4: Workday/Ashby raise NotImplementedError — surface it clearly
-                # instead of letting the outer except swallow it as a generic failure.
                 logger.warning("ATS flow not implemented for '%s': %s", ats_name, e)
-                return False
+                return False, f"Not implemented: {e}"
             except PlaywrightTimeoutError as e:
-                raise ATSTimeoutError(f"Timeout filling {ats_name} form: {e}")
+                msg = f"Timeout filling {ats_name} form: {e}"
+                raise ATSTimeoutError(msg)
             finally:
                 browser.close()
     except Exception as e:
         logger.error("Exception in apply: %s", e)
-        return False
+        return False, str(e)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
