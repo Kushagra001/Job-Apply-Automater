@@ -78,20 +78,33 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     Call Groq to score a single (JD, variant) pair.
     Returns partial Score result: {score, missing_skills, reasoning}.
     """
+    jd_description = jd.get('description', '').strip()
+    description_note = (
+        "NOTE: The job description body is empty or very short. "
+        "Score primarily based on the job title, company, and your knowledge of what that role typically requires. "
+        "Be generous — if the title clearly matches the candidate's stack, score 70+."
+        if len(jd_description) < 100 else ""
+    )
+    
     prompt = f"""
     You are an expert technical recruiter scoring a job description against a candidate's resume.
+    {description_note}
     
-    Job Description:
-    {json.dumps(jd, indent=2)}
+    Job:
+    Title: {jd.get('title', '')}
+    Company: {jd.get('company', '')}
+    Location: {jd.get('location', '')}
+    Description: {jd_description[:3000] if jd_description else '(not provided — use title/company to infer role requirements)'}
     
-    Resume Variant:
-    {json.dumps(variant, indent=2)}
+    Candidate Resume Variant ({variant.get('variant', 'unknown')}):
+    Skills: {json.dumps(variant.get('skills', []))}
+    Summary: {variant.get('summary', '')}
+    Experience titles: {[exp.get('title', '') for exp in variant.get('experience', [])]}
     
-    Analyze the match between the resume and the job description.
-    Return a JSON object with exactly these fields:
-    - "score": integer between 0 and 100 representing the fit.
-    - "missing_skills": list of strings for critical skills mentioned in JD but missing in resume.
-    - "reasoning": a brief explanation of the score and missing skills.
+    Return JSON with exactly these fields:
+    - "score": integer 0-100 (match quality). Use 70+ if title clearly aligns with candidate stack.
+    - "missing_skills": list of strings for critical skills in JD but absent from resume.
+    - "reasoning": 1-2 sentence explanation.
     """
     # Fix #12: lazy-init client — only reads GROQ_API_KEY when actually called,
     #          not at import time, keeping test isolation clean.

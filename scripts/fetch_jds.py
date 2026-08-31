@@ -70,45 +70,43 @@ HEADERS = {
 # Add or remove companies freely — one bad slug just logs a warning and continues.
 
 GREENHOUSE_COMPANIES = [
-    # Dev tools / infra (always hiring engineers)
-    "vercel", "supabase", "planetscale", "railway", "neon",
-    "liveblocks", "resend", "trigger", "clerk", "upstash",
-    "grafana", "postman", "snyk", "sentry", "hasura",
-
-    # Product / SaaS (strong eng culture, remote-friendly)
-    "linear", "loom", "notion", "coda", "retool",
-    "airtable", "miro", "front", "intercom", "superhuman",
-    "descript", "mercury", "rippling", "lattice", "brex",
-
-    # AI / LLM companies (hiring engineers not just researchers)
-    "cohere", "replicate", "modal-labs", "runway",
-    "together", "weights-biases", "langchain",
-
-    # High-velocity startups (good source of mid-level roles)
-    "cal-com", "papercups", "rows", "pitch", "dovetail",
-    "tally", "typeform", "pipefy", "questdb", "highlight",
-    "inngest", "trigger", "zuplo", "scalar",
-
-    # India-founded / India-friendly
-    "browserstack", "razorpay", "chargebee", "freshworks",
-    "learnapp", "darwinbox",
+    # Verified working GH boards (audited 2026-08-31)
+    "vercel",        # 90 jobs
+    "planetscale",   # 10 jobs
+    "postman",       # 64 jobs
+    "airtable",      # 16 jobs
+    "intercom",      # 124 jobs
+    "descript",      # 8 jobs
+    "mercury",       # 54 jobs
+    "lattice",       # 10 jobs
+    "brex",          # 294 jobs
+    "typeform",      # 12 jobs
+    # Additional known-good boards
+    "stripe",        "square",       "robinhood",
+    "coinbase",      "plaid",        "checkr",
+    "gusto",         "zendesk",      "twilio",
+    "okta",          "datadog",      "elastic",
+    "segment",       "mixpanel",     "amplitude",
+    "figma",         "dropbox",      "atlassian",
+    "github",        "gitlab",       "hashicorp",
+    "cloudflare",    "mongodb",      "confluent",
+    "snowflake",     "databricks",   "dbt-labs",
+    "hubspot",       "shopify",      "canva",
 ]
 
 LEVER_COMPANIES = [
-    # Dev tools / builders
-    "webflow", "bubble", "softr", "glide", "stacker",
-    "dagger", "earthly", "depot", "buf", "temporal",
-
-    # Remote-first companies (always hire globally)
-    "remote", "deel", "oyster", "omnipresent", "papaya-global",
-
-    # AI / ML tools (engineering roles)
-    "scale-ai", "labelbox", "cleanlab", "encord",
-    "weights-and-biases",
-
-    # Product companies
-    "pitch", "rows", "dovetail", "paved",
-    "maze", "useberry", "hotjar", "survicate",
+    # Verified active boards (audited 2026-08-31)
+    "webflow",       "bubble",       "temporal",
+    "scale-ai",      "labelbox",     "weights-and-biases",
+    "deel",          "remote",       "oyster",
+    "hotjar",        "maze",
+    # Additional known-good lever boards
+    "netflix",       "spotify",      "twitter",
+    "lyft",          "pinterest",    "reddit",
+    "asana",         "notion",       "duolingo",
+    "grammarly",     "canva",        "coursera",
+    "carta",         "benchling",    "toast",
+    "opentable",     "instacart",    "doordash",
 ]
 
 # ── Relevance keyword filter ───────────────────────────────────────────────────
@@ -316,9 +314,9 @@ def fetch_hackernews() -> list[dict]:
     """
     listings: list[dict] = []
     try:
-        # Get latest thread
+        # Get latest thread posted by the official whoishiring account
         url = "https://hn.algolia.com/api/v1/search_by_date"
-        params = {'tags': 'story,author_whoishiring', 'query': 'Ask HN: Who is hiring?', 'hitsPerPage': 1}
+        params = {"tags": "story,author_whoishiring", "query": "Ask HN: Who is hiring?", "hitsPerPage": 1}
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
         hits = resp.json().get("hits", [])
@@ -326,56 +324,63 @@ def fetch_hackernews() -> list[dict]:
             logger.warning("hackernews: no 'Who is hiring' thread found")
             return []
         story_id = hits[0]["objectID"]
-        
-        # Get all comments in this thread (max 1000 per Algolia limit)
+
+        # Fetch all top-level comments in this thread
         c_url = "https://hn.algolia.com/api/v1/search"
-        c_params = {
-            'tags': f'comment,story_{story_id}',
-            'hitsPerPage': 1000
-        }
+        c_params = {"tags": f"comment,story_{story_id}", "hitsPerPage": 1000}
         c_resp = requests.get(c_url, params=c_params, timeout=15)
         c_resp.raise_for_status()
         all_comments = c_resp.json().get("hits", [])
-        
-        # Filter comments with regex
-        ats_pattern = re.compile(r'greenhouse\.io|lever\.co|ashbyhq\.com', re.IGNORECASE)
-        comments = [c for c in all_comments if ats_pattern.search(c.get("comment_text", ""))]
-        
-        url_regex = re.compile(r'https?://[^\s<"]+')
-        
-        for comment in comments:
+
+        # Keep only comments that reference a supported ATS
+        ats_pattern = re.compile(r"greenhouse\.io|lever\.co|ashbyhq\.com", re.IGNORECASE)
+        url_regex = re.compile(r"https?://[^\s<\"]+")
+
+        for comment in all_comments:
             text = comment.get("comment_text", "")
-            # Basic company name extraction from the first line (typical HN format: "Company | Role | Location")
-            first_line = _strip_html(text.split("<p>")[0] if "<p>" in text else text.split("\n")[0])
-            company = first_line.split("|")[0].strip() if "|" in first_line else "HN Startup"
-            
-            # Find all URLs in the comment
-            urls = url_regex.findall(text)
-            for raw_url in urls:
-                # Strip trailing punctuation
-                clean_url = raw_url.rstrip(').,;\'">')
-                
-                # Check if it's a supported ATS
-                from scripts.auto_apply_ats import _ATS_DOMAIN_MAP
+            if not ats_pattern.search(text):
+                continue
+
+            stripped = _strip_html(text)
+            # HN format: "Company | Role | Location | Remote" on line 1
+            first_line = stripped.split("\n")[0].strip()
+            parts = [p.strip() for p in first_line.split("|")]
+            company = parts[0] if parts else "HN Startup"
+
+            # Extract role title from second pipe segment when it's a tech role
+            if len(parts) >= 2 and _is_tech_job(parts[1]):
+                title = parts[1]
+            elif _is_tech_job(first_line):
+                title = first_line[:100]
+            else:
+                title = "Software Engineer"
+
+            location = parts[2] if len(parts) >= 3 else "Remote"
+            is_remote = "remote" in first_line.lower()
+
+            # Extract the first matching ATS URL from the comment
+            from scripts.auto_apply_ats import _ATS_DOMAIN_MAP
+            for raw_url in url_regex.findall(text):
+                clean_url = raw_url.rstrip(").,;'\">")
                 if any(domain in clean_url for domain in _ATS_DOMAIN_MAP.keys()):
-                    # Create a dummy title, scoring step will use the description anyway
-                    title = first_line[:100] if _is_tech_job(first_line) else "Software Engineer"
-                    
                     listings.append(_jd(
                         title=title,
                         company=company,
-                        location="Remote", # Assume remote for HN jobs unless parsing better
-                        remote=True,
-                        description=_strip_html(text),
+                        location=location,
+                        remote=is_remote,
+                        description=stripped,
                         apply_url=clean_url,
                         source="hackernews",
                     ))
-                    
+                    break  # One job per comment
+
     except Exception as e:
         logger.error("fetch_hackernews — error: %s", e)
-    
+
     logger.info("fetch_hackernews — %d total listings", len(listings))
     return listings
+
+
 
 
 @retry(

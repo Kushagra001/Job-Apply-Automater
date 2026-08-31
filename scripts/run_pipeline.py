@@ -53,14 +53,15 @@ def main():
         company = jd.get("company", "Unknown Company")
         logger.info(f"--- Processing [{i+1}/{len(jds)}]: {title} at {company} ---")
         
-        # 1.5 Check ATS compatibility early to save LLM tokens
-        # Fix #3: use exact domain strings from _ATS_DOMAIN_MAP in auto_apply_ats.py
+        # Gate: only advance jobs we can actually apply to
         apply_url = jd.get("apply_url", "")
+        source = jd.get("source", "")
         _SUPPORTED_DOMAINS = (
             "greenhouse.io", "lever.co", "ashbyhq.com",
-            "remotive.com", "remoteok.com",  # job-board passthrough flows
         )
-        if not any(domain in apply_url for domain in _SUPPORTED_DOMAINS):
+        # RemoteOK and Remotive have their own apply flows, always pass them through
+        is_aggregator = source in ("remoteok", "remotive")
+        if not is_aggregator and not any(domain in apply_url for domain in _SUPPORTED_DOMAINS):
             logger.warning(f"Unsupported ATS or apply URL for '{title}' at '{company}': {apply_url}")
             log_result(
                 jd=jd,
@@ -126,28 +127,35 @@ def main():
             
         # 5. Apply
         logger.info("Applying via ATS...")
+        apply_notes = ""
         try:
             dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
-            success = apply(jd, pdf_path, dry_run=dry_run)
+            success, apply_notes = apply(jd, pdf_path, dry_run=dry_run)
             status = "apply_success" if success else "apply_failed"
             if dry_run and success:
                 status = "dry_run_success"
+            if apply_notes:
+                logger.warning(f"Apply notes for '{title}' at '{company}': {apply_notes}")
             logger.info(f"Application status: {status}")
         except Exception as e:
             logger.error(f"Error applying to '{title}' at '{company}': {e}")
             status = "apply_error"
+            apply_notes = str(e)
             success = False
             
         # 6. Log
         logger.info("Logging result to Google Sheets...")
         try:
+            combined_notes = reasoning[:200]
+            if apply_notes:
+                combined_notes = (combined_notes + " | apply_err: " + apply_notes)[:400]
             log_result(
                 jd=jd,
                 score=score,
                 variant_used=best_variant,
                 status=status,
                 pdf_path=pdf_path,
-                notes=reasoning[:200]
+                notes=combined_notes,
             )
         except Exception as e:
             logger.error(f"Error logging result: {e}")
