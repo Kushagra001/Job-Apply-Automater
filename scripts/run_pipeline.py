@@ -58,6 +58,7 @@ def main():
         source = jd.get("source", "")
         _SUPPORTED_DOMAINS = (
             "greenhouse.io", "lever.co", "ashbyhq.com",
+            "gh_jid=", # For custom greenhouse domains like stripe.com
         )
         # RemoteOK and Remotive have their own apply flows, always pass them through
         is_aggregator = source in ("remoteok", "remotive")

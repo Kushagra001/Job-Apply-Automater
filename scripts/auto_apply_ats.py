@@ -85,6 +85,11 @@ def detect_ats(apply_url: str) -> str:
     for domain, name in _ATS_DOMAIN_MAP.items():
         if domain in host:
             return name
+            
+    # Support custom Greenhouse domains (like stripe.com) that use gh_jid
+    if "gh_jid=" in apply_url or "greenhouse" in apply_url:
+        return "greenhouse"
+        
     raise UnsupportedATSError(f"Unsupported ATS domain: {host}")
 
 
@@ -169,7 +174,8 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
         
     if not dry_run:
         logger.info("Submitting Lever application...")
-        page.click('button.postings-btn-submit')
+        # Fix Lever submit button selector: classes are separated by space, so .postings-btn-submit fails.
+        page.click('button#btn-submit, button.template-btn-submit')
         page.wait_for_load_state('networkidle')
     else:
         logger.info("--dry-run: Skipped submit click.")
@@ -186,14 +192,20 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     if apply_btn.count() > 0 and apply_btn.first.is_visible():
         apply_btn.first.click()
         
-    page.wait_for_selector('input[name="name"]', timeout=SELECTOR_TIMEOUT_MS)
+    # Fix Ashby selectors: Ashby uses _systemfield_ prefix for its form fields
+    page.wait_for_selector('input[name="name"], input[name="_systemfield_name"]', timeout=SELECTOR_TIMEOUT_MS)
     
-    page.fill('input[name="name"]', USER_PROFILE["full_name"])
-    page.fill('input[name="email"]', USER_PROFILE["email"])
+    name_input = page.locator('input[name="name"], input[name="_systemfield_name"]')
+    if name_input.count() > 0:
+        name_input.first.fill(USER_PROFILE["full_name"])
+        
+    email_input = page.locator('input[name="email"], input[name="_systemfield_email"]')
+    if email_input.count() > 0:
+        email_input.first.fill(USER_PROFILE["email"])
     
-    phone_input = page.locator('input[name="phone"]')
+    phone_input = page.locator('input[name="phone"], input[name="_systemfield_phone"]')
     if phone_input.count() > 0:
-        phone_input.fill(USER_PROFILE["phone"])
+        phone_input.first.fill(USER_PROFILE["phone"])
         
     resume_input = page.locator('input[type="file"]')
     if resume_input.count() > 0:
