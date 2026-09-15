@@ -166,6 +166,11 @@ def main():
                     status = "dry_run_success"
                 else:
                     status = "apply_success_base" if success else "apply_failed"
+            except NotImplementedError as e:
+                logger.info(f"Skipping JD (Unsupported ATS): {e}")
+                status = "skipped_unsupported"
+                apply_notes = str(e)
+                success = False
             except Exception as e:
                 status = "apply_error"
                 apply_notes = str(e)
@@ -219,6 +224,11 @@ def main():
             if apply_notes:
                 logger.warning(f"Apply notes for '{title}' at '{company}': {apply_notes}")
             logger.info(f"Application status: {status}")
+        except NotImplementedError as e:
+            logger.info(f"Skipping JD (Unsupported ATS): {e}")
+            status = "skipped_unsupported"
+            apply_notes = str(e)
+            success = False
         except Exception as e:
             logger.error(f"Error applying to '{title}' at '{company}': {e}")
             status = "apply_error"

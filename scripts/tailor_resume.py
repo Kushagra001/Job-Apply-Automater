@@ -91,8 +91,6 @@ FALLBACK_MODELS = [
     "openai/gpt-oss-20b",     # rate limited but better quality → TERTIARY
     "openai/gpt-oss-120b",    # best quality but severe rate limits → LAST RESORT
 ]
-# Fix #10: shared global for fallback rotation (single thread — acceptable here)
-_CURRENT_MODEL_INDEX = 0
 
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -126,17 +124,12 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     {json.dumps(variant_json, indent=2)}
     """
 
-    global _CURRENT_MODEL_INDEX
     last_error = None
 
-    # Fix #10: iterate through fallbacks; advance index BEFORE each retry
-    for attempt in range(len(FALLBACK_MODELS)):
-        forced_model = os.environ.get("GROQ_MODEL")
-        if forced_model:
-            model_name = forced_model
-        else:
-            model_name = FALLBACK_MODELS[_CURRENT_MODEL_INDEX]
+    forced_model = os.environ.get("GROQ_MODEL")
+    models_to_try = [forced_model] if forced_model else FALLBACK_MODELS
 
+    for model_name in models_to_try:
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -153,13 +146,11 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
             validate_tailored(variant_json, tailored)
             return tailored
         except GroqError as e:
-            logger.warning("Groq API error for model %s: %s", model_name, e)
+            logger.warning("Groq API error (tailoring) for model %s: %s", model_name, e)
             last_error = e
             if forced_model:
                 raise e  # User explicitly forced a model — don't silently fall back
-            # Advance to next model for next iteration
-            _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
-            logger.info("Switching to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
+            logger.info("Attempting next fallback model...")
         except ValueError as ve:
             logger.error("Validation failed: %s. Returning original variant.", ve)
             return copy.deepcopy(variant_json)

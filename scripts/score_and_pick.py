@@ -65,8 +65,6 @@ FALLBACK_MODELS = [
     "openai/gpt-oss-20b",     # rate limited but better quality → TERTIARY
     "openai/gpt-oss-120b",    # best quality but severe rate limits → LAST RESORT
 ]
-# Fix #10: use a simple index tracked per-call, not a shared global mutated mid-loop
-_CURRENT_MODEL_INDEX = 0
 
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -109,19 +107,12 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
     # Fix #12: lazy-init client — only reads GROQ_API_KEY when actually called,
     #          not at import time, keeping test isolation clean.
     client = Groq()
-
-    global _CURRENT_MODEL_INDEX
     last_error = None
 
-    # Fix #10: iterate through fallbacks, advancing the index BEFORE the attempt
-    #          so each pass in the loop actually tries a different model.
-    for attempt in range(len(FALLBACK_MODELS)):
-        forced_model = os.environ.get("GROQ_MODEL")
-        if forced_model:
-            model_name = forced_model
-        else:
-            model_name = FALLBACK_MODELS[_CURRENT_MODEL_INDEX]
+    forced_model = os.environ.get("GROQ_MODEL")
+    models_to_try = [forced_model] if forced_model else FALLBACK_MODELS
 
+    for model_name in models_to_try:
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -145,9 +136,7 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
             last_error = e
             if forced_model:
                 raise e  # User explicitly forced a model — don't silently fall back
-            # Advance to the next model for the next iteration
-            _CURRENT_MODEL_INDEX = (_CURRENT_MODEL_INDEX + 1) % len(FALLBACK_MODELS)
-            logger.info("Switching to fallback model: %s", FALLBACK_MODELS[_CURRENT_MODEL_INDEX])
+            logger.info("Attempting next fallback model...")
         except Exception as e:
             logger.error("Unexpected error scoring JD: %s", e)
             return {"score": 0, "missing_skills": [], "reasoning": f"Error: {e}"}
