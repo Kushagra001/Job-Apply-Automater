@@ -33,6 +33,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright_stealth import stealth_sync
 
 from dotenv import load_dotenv
 
@@ -111,7 +112,7 @@ def _fill_social_fields(page, field_keyword: str, value: str) -> None:
 
 # ── ATS flows (Playwright) ────────────────────────────────────────────────────
 
-def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
     """Fill and optionally submit a Greenhouse application form.
 
     Handles both legacy boards (boards.greenhouse.io) and modern React-rendered
@@ -173,6 +174,11 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     # Fix: use _fill_social_fields to avoid checkbox crash
     _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
 
+    if cover_letter:
+        cl_input = page.locator("textarea[name*='cover_letter' i], textarea#cover_letter_text, textarea[name*='comments' i]")
+        if cl_input.count() > 0:
+            cl_input.first.fill(cover_letter)
+
     if not dry_run:
         logger.info("Submitting Greenhouse application...")
         submit = page.locator("button#submit_app, button[type='submit']")
@@ -184,7 +190,7 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     return True
 
 
-def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
     """Fill and optionally submit a Lever application form.
 
     Handles both jobs.lever.co (listing page → apply button → form) and
@@ -227,10 +233,14 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
 
-    # Fix: use _fill_social_fields to avoid checkbox crash
     _fill_social_fields(page, "LinkedIn", USER_PROFILE["linkedin"])
     _fill_social_fields(page, "GitHub", USER_PROFILE["github"])
     _fill_social_fields(page, "Portfolio", USER_PROFILE["portfolio"])
+
+    if cover_letter:
+        cl_input = page.locator("textarea[name*='comments' i], textarea[name*='cover' i]")
+        if cl_input.count() > 0:
+            cl_input.first.fill(cover_letter)
 
     if not dry_run:
         logger.info("Submitting Lever application...")
@@ -247,7 +257,7 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     return True
 
 
-def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
     """Fill and optionally submit an Ashby application form.
 
     Ashby is a React SPA. The form renders asynchronously after a button click,
@@ -305,6 +315,12 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     _fill_social_fields(page, "portfolio", USER_PROFILE["portfolio"])
     _fill_social_fields(page, "website", USER_PROFILE["portfolio"])
 
+    if cover_letter:
+        # Ashby often uses standard names or _systemfield_ cover letter equivalents
+        cl_input = page.locator("textarea[name*='coverLetter' i], textarea[name*='comments' i], textarea[name*='message' i]")
+        if cl_input.count() > 0:
+            cl_input.first.fill(cover_letter)
+
     if not dry_run:
         logger.info("Submitting Ashby application...")
         page.locator("button[type='submit']").first.click()
@@ -315,7 +331,7 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     return True
 
 
-def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
     """
     Remotive listing pages show a 'Apply for this job' button that either:
       a) opens a modal with an embedded ATS form, or
@@ -351,13 +367,13 @@ def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
         return False
 
     try:
-        result = flow_fn(new_page, jd, pdf_path, dry_run)
+        result = flow_fn(new_page, jd, pdf_path, dry_run, cover_letter)
     finally:
         new_page.close()
     return result
 
 
-def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
+def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
     """
     RemoteOK listing pages have an 'Apply Now' button that redirects to the
     company's ATS. We click it and re-detect the ATS on the resulting page.
@@ -391,7 +407,7 @@ def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
         return False
 
     try:
-        result = flow_fn(new_page, jd, pdf_path, dry_run)
+        result = flow_fn(new_page, jd, pdf_path, dry_run, cover_letter)
     finally:
         new_page.close()
     return result
@@ -408,14 +424,15 @@ _ATS_FLOW_MAP = {
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
+def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = "") -> tuple[bool, str]:
     """
     Detect ATS and run the appropriate Playwright form-fill flow.
 
     Args:
-        jd:       JD dict (from fetch_jds.py)
-        pdf_path: Absolute path to the tailored resume PDF
-        dry_run:  If True, fill fields but do not click submit
+        jd:           JD dict (from fetch_jds.py)
+        pdf_path:     Absolute path to the tailored resume PDF
+        dry_run:      If True, fill fields but do not click submit
+        cover_letter: Generated cover letter text to paste into textarea
 
     Returns:
         (success: bool, notes: str) — notes contains the failure reason on
@@ -437,6 +454,7 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
                 )
             )
             page = context.new_page()
+            stealth_sync(page)
 
             logger.info("Navigating to %s", apply_url)
             page.goto(apply_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
@@ -451,7 +469,7 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
             flow_fn = _ATS_FLOW_MAP[ats_name]
 
             try:
-                ok = flow_fn(page, jd, pdf_path, dry_run)
+                ok = flow_fn(page, jd, pdf_path, dry_run, cover_letter)
                 return (ok, "") if ok else (False, "ATS flow returned False")
             except PlaywrightTimeoutError as e:
                 msg = f"Timeout filling {ats_name} form: {e}"

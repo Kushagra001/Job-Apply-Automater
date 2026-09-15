@@ -49,6 +49,14 @@ SHEET_COLUMNS = [
 # Fix #5: cache the processed-URL set so we only hit the Sheets API once per process
 _PROCESSED_URLS_CACHE: set[str] | None = None
 
+# Buffer for the daily Telegram digest
+_DIGEST_BUFFER = {
+    "applied_tailored": [],
+    "applied_base": [],
+    "failed": [],
+    "skipped": [],
+}
+
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 
@@ -152,6 +160,33 @@ def notify_telegram(message: str) -> None:
         logger.warning("Failed to send Telegram notification: %s", e)
 
 
+def send_daily_digest() -> None:
+    """
+    Format and send the buffered daily digest to Telegram.
+    Called once at the end of the pipeline run.
+    """
+    total = sum(len(lst) for lst in _DIGEST_BUFFER.values())
+    if total == 0:
+        return
+
+    msg = f"<b>Job Application Pipeline Complete</b> 🏁\n\n"
+    msg += f"🟢 Applied (tailored): {len(_DIGEST_BUFFER['applied_tailored'])}\n"
+    msg += f"🟡 Applied (base): {len(_DIGEST_BUFFER['applied_base'])}\n"
+    msg += f"🔴 Failed: {len(_DIGEST_BUFFER['failed'])}\n"
+    msg += f"⏭️ Skipped: {len(_DIGEST_BUFFER['skipped'])}\n\n"
+    
+    if _DIGEST_BUFFER['failed']:
+        msg += "<b>Failed Apps:</b>\n"
+        # Only show up to 5 failures to keep message length sane
+        for f in _DIGEST_BUFFER['failed'][:5]:
+            msg += f"• {f['company']} - {f['title']} (<a href='{f['url']}'>Link</a>)\n"
+        if len(_DIGEST_BUFFER['failed']) > 5:
+            msg += f"<i>...and {len(_DIGEST_BUFFER['failed']) - 5} more</i>\n"
+
+    notify_telegram(msg)
+
+
+
 # ── Public helpers ────────────────────────────────────────────────────────────
 
 def log_result(
@@ -190,12 +225,20 @@ def log_result(
         logger.error("log_result: failed to append row: %s", e)
         print(json.dumps(row))
 
-    msg = (f"[{status.upper()}] {jd.get('company')} — {jd.get('title')}\n"
-           f"Score: {score} | Variant: {variant_used}")
-    try:
-        notify_telegram(msg)
-    except NotImplementedError:
-        pass  # Not implemented yet — skip silently
+    # Buffer for Telegram digest instead of sending instantly
+    if status == "apply_success_tailored":
+        _DIGEST_BUFFER["applied_tailored"].append(row)
+    elif status == "apply_success_base":
+        _DIGEST_BUFFER["applied_base"].append(row)
+    elif status == "skipped_low_score":
+        _DIGEST_BUFFER["skipped"].append(row)
+    elif status in ("apply_failed", "apply_error"):
+        # Add URL to failed jobs for easy manual apply
+        _DIGEST_BUFFER["failed"].append({
+            "company": jd.get("company", "Unknown"),
+            "title": jd.get("title", "Unknown"),
+            "url": jd.get("apply_url", "")
+        })
 
 
 def log_failure(source: str, error: Exception) -> None:

@@ -14,7 +14,7 @@ from scripts.score_and_pick import score_and_pick
 from scripts.tailor_resume import tailor_resume
 from scripts.render_pdf import render_pdf
 from scripts.auto_apply_ats import apply
-from scripts.log_and_notify import log_result
+from scripts.log_and_notify import log_result, send_daily_digest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("run_pipeline")
@@ -65,11 +65,27 @@ def main():
         logger.info("No JDs found. Exiting.")
         return
 
+    # Deduplicate across sources based on (company, title)
+    unique_jds = []
+    seen_roles = set()
+    for jd in jds:
+        # Normalize to lowercase and strip whitespace for matching
+        company = jd.get("company", "").lower().strip()
+        title = jd.get("title", "").lower().strip()
+        key = f"{company}::{title}"
+        if key not in seen_roles:
+            seen_roles.add(key)
+            unique_jds.append(jd)
+
+    logger.info(f"Deduplicated JDs: {len(jds)} raw -> {len(unique_jds)} unique.")
+    jds = unique_jds
+
     if len(jds) > MAX_JOBS_PER_RUN:
         logger.info(f"Capping run to {MAX_JOBS_PER_RUN} JDs (fetched {len(jds)}). Set MAX_JOBS_PER_RUN env var to change.")
         jds = jds[:MAX_JOBS_PER_RUN]
 
     logger.info(f"Fetched {len(jds)} unique JDs. Processing...")
+
     
     # Process each JD
     for i, jd in enumerate(jds):
@@ -194,7 +210,8 @@ def main():
         apply_notes = ""
         try:
             dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
-            success, apply_notes = apply(jd, pdf_path, dry_run=dry_run)
+            cl = tailored.get("cover_letter", "")
+            success, apply_notes = apply(jd, pdf_path, dry_run=dry_run, cover_letter=cl)
             if dry_run and success:
                 status = "dry_run_success"
             else:
@@ -229,6 +246,12 @@ def main():
         time.sleep(10)
 
     logger.info("Pipeline run complete.")
+    
+    # 7. Send daily digest
+    try:
+        send_daily_digest()
+    except Exception as e:
+        logger.error(f"Failed to send daily digest: {e}")
 
 if __name__ == "__main__":
     main()

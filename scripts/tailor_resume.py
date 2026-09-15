@@ -116,7 +116,8 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
     3. You MAY rewrite the 'summary' field to better align with the job description.
     4. You MAY slightly rephrase existing bullets for better impact, but do NOT invent new responsibilities, metrics, or technologies.
     5. The number of bullets per experience role and per project MUST remain EXACTLY the same.
-    6. Return a valid JSON object matching the exact schema of the original resume.
+    6. Generate a 3-sentence cover letter targeted to this specific role and company. Add it as a new top-level key: "cover_letter".
+    7. Return a valid JSON object matching the exact schema of the original resume plus the new "cover_letter" key.
 
     Job Description:
     {json.dumps(jd, indent=2)}
