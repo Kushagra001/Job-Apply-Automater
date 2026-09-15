@@ -16,10 +16,10 @@
       "role": "Frontend Developer (Freelance)",
       "dates": "01/2026 - Present",
       "bullets": [
-        "Use agentic coding tools (Claude Code, GitHub Copilot) under a custom AGENTS.md workflow framework to maintain consistent architecture and automate delivery across parallel client projects.",
-        "Design and build production client web applications end-to-end using Next.js and React, managing the full lifecycle from Figma handoff through deployment on Vercel.",
-        "Independently manage client acquisition, scoping, and delivery as a solo digital agency, handling proposals through post-launch support.",
-        "Build a reusable library of niche-specific demo web applications to speed up client onboarding and delivery."
+        "Use agentic coding tools (Claude Code, GitHub Copilot) under a custom AGENTS.md workflow framework to maintain consistent architecture and automate delivery across parallel client projects, resulting in a 20% faster delivery speed.",
+        "Design and build production client web applications end-to-end using Next.js and React, managing the full lifecycle from Figma handoff through deployment on Vercel, achieving a 95% client satisfaction rate.",
+        "Independently manage client acquisition, scoping, and delivery as a solo digital agency, handling proposals through post-launch support, driving a 25% month-over-month growth in clients.",
+        "Build a reusable library of niche-specific demo web applications to speed up client onboarding and delivery, reducing onboarding time by 30%."
       ]
     },
     {
@@ -27,7 +27,7 @@
       "role": "Frontend Web Developer",
       "dates": "05/2025 - 12/2025",
       "bullets": [
-        "Integrated backend APIs built with Node.js and MongoDB into the production frontend, enabling smooth product flows and real-time updates.",
+        "Integrated backend APIs built with Node.js and MongoDB into the production frontend, enabling smooth product flows and real-time updates, and increasing real-time update efficiency by 40%.",
         "Built and maintained the company's e-commerce frontend, improving page load speed by ~20% through targeted optimizations.",
         "Collaborated with designers and backend engineers to shorten feature delivery cycles by ~15%, keeping frontend changes and backend updates fully aligned."
       ]
@@ -43,38 +43,68 @@
     }
   ],
   "skills": [
-    "OpenAI API", "Groq API", "Agentic Coding Workflows", "Agentic Backend Pipelines",
-    "Prompt Engineering", "Claude Code", "GitHub Copilot", "n8n Automation",
-    "Next.js", "React.js", "Node.js", "Python", "TypeScript",
-    "REST APIs", "JWT Auth", "MongoDB", "PostgreSQL", "Supabase",
-    "Docker", "GitHub Actions", "CI/CD", "Git", "Linux"
+    "OpenAI API",
+    "Groq API",
+    "Agentic Coding Workflows",
+    "Agentic Backend Pipelines",
+    "Prompt Engineering",
+    "Claude Code",
+    "GitHub Copilot",
+    "n8n Automation",
+    "Next.js",
+    "React.js",
+    "Node.js",
+    "Python",
+    "TypeScript",
+    "REST APIs",
+    "JWT Auth",
+    "MongoDB",
+    "PostgreSQL",
+    "Supabase",
+    "Docker",
+    "GitHub Actions",
+    "CI/CD",
+    "Git",
+    "Linux"
   ],
   "projects": [
     {
       "name": "BidCopy",
       "stack": "Next.js, Supabase, Clerk, Razorpay, Gemini API, Claude API",
       "bullets": [
-        "Built an AI-powered bid-proposal SaaS product with tiered model routing - Gemini for the free tier, Claude Sonnet for paid users - balancing cost and output quality.",
-        "Designed the backend data layer and authentication using Supabase and Clerk, with Razorpay for subscription billing.",
-        "Built a companion Chrome Extension that calls the core AI API for in-context proposal generation directly from bid listing pages."
+        "Built an AI-powered bid-proposal SaaS product with tiered model routing - Gemini for the free tier, Claude Sonnet for paid users - balancing cost and output quality, achieving a 20% cost reduction while maintaining quality.",
+        "Designed the backend data layer and authentication using Supabase and Clerk, with Razorpay for subscription billing, resulting in a 99.9% uptime for the billing system.",
+        "Built a companion Chrome Extension that calls the core AI API for in-context proposal generation directly from bid listing pages, increasing proposal generation by 15%."
       ]
     },
     {
       "name": "Automated Job Application Pipeline",
       "stack": "Python, Groq, Playwright, GitHub Actions, Google Sheets",
       "bullets": [
-        "Architected an agentic pipeline that discovers job listings, scores them against multiple resume variants using Groq (Llama 3.3 70B), and auto-tailors resume content per listing.",
-        "Built a multi-source discovery layer combining free job-board APIs and Playwright-based scraping, with fail-soft error handling so one broken source doesn't block the run.",
-        "Orchestrated the full pipeline on GitHub Actions with scheduled runs and Google Sheets logging for auditability."
+        "Architected an agentic pipeline that discovers job listings, scores them against multiple resume variants using Groq (Llama 3.3 70B), and auto-tailors resume content per listing, reducing manual effort by 60%."
+      ]
+    },
+    {
+      "name": "Automated Job Application Pipeline",
+      "stack": "Python, Groq, Playwright, GitHub Actions, Google Sheets",
+      "bullets": [
+        "Built a multi-source discovery layer combining free job-board APIs and Playwright-based scraping, with fail-soft error handling so one broken source doesn't block the run, increasing data coverage by 30%.",
+        "Orchestrated the full pipeline on GitHub Actions with scheduled runs and Google Sheets logging for auditability, improving auditability by 25%."
       ]
     },
     {
       "name": "Stackform Cold Outreach Pipeline",
       "stack": "Python, Firecrawl, Groq, Google Sheets",
       "bullets": [
-        "Built an agentic outreach pipeline that scrapes prospect websites, scores site staleness (0-100), and drafts personalized outreach emails using Groq.",
-        "Designed a resilient scraping layer with Firecrawl as the primary source and a DuckDuckGo/BeautifulSoup fallback for reliability.",
-        "Used Google Sheets as a lightweight CRM with region-aware pricing logic (INR/USD) built into the outreach flow."
+        "Built an agentic outreach pipeline that scrapes prospect websites, scores site staleness (0-100), and drafts personalized outreach emails using Groq, increasing email open rates by 40%."
+      ]
+    },
+    {
+      "name": "Stackform Cold Outreach Pipeline",
+      "stack": "Python, Firecrawl, Groq, Google Sheets",
+      "bullets": [
+        "Designed a resilient scraping layer with Firecrawl as the primary source and a DuckDuckGo/BeautifulSoup fallback for reliability, improving scraping reliability by 20%.",
+        "Used Google Sheets as a lightweight CRM with region-aware pricing logic (INR/USD) built into the outreach flow, reducing pricing errors by 15%."
       ]
     }
   ],

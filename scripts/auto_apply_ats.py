@@ -49,6 +49,7 @@ USER_PROFILE = {
     "full_name": "Kushagra Singh Negi",
     "email": "kushagrasinghnegi9@gmail.com",
     "phone": "9521693663",
+    "phone_international": "+919521693663",
     "linkedin": "https://www.linkedin.com/in/kushh01",
     "github": "https://github.com/Kushagra001",
     "portfolio": "https://www.stack-form.dev/",
@@ -161,7 +162,7 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter
         "input[autocomplete='tel'], input#phone, input[name='phone']"
     )
     if phone.count() > 0:
-        phone.first.fill(USER_PROFILE["phone"])
+        phone.first.fill(USER_PROFILE["phone_international"])
 
     resume_input = page.locator(
         "input[type='file'][data-source='resume'], "

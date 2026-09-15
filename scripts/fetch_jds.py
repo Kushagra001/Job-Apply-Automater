@@ -612,8 +612,19 @@ def fetch_all() -> list[dict]:
         processed_urls = get_processed_urls()
         if processed_urls:
             before_len = len(deduped)
-            deduped = [jd for jd in deduped if jd.get("apply_url") not in processed_urls]
-            logger.info("fetch_all — filtered out %d already processed URLs", before_len - len(deduped))
+            
+            def is_valid_jd(jd):
+                url = jd.get("apply_url", "")
+                if url in processed_urls:
+                    return False
+                # Filter out Ashby boards without a specific job UUID
+                # e.g. https://jobs.ashbyhq.com/brex (len=4) vs https://jobs.ashbyhq.com/brex/123-abc (len=5)
+                if "ashbyhq.com" in url and len(url.rstrip("/").split("/")) < 5:
+                    return False
+                return True
+                
+            deduped = [jd for jd in deduped if is_valid_jd(jd)]
+            logger.info("fetch_all — filtered out %d already processed or invalid URLs", before_len - len(deduped))
     except Exception:
         logger.warning("fetch_all — could not load processed URLs; continuing without filter")
 

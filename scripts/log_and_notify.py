@@ -117,14 +117,28 @@ def get_processed_urls() -> set[str]:
     try:
         sheet = _get_sheet()
         all_rows = sheet.get_all_records()
-        _PROCESSED_URLS_CACHE = {
-            str(r.get("apply_url", "")).strip()
-            for r in all_rows
-            if r.get("status") in SUCCESSFUL_STATUSES
-            and r.get("apply_url", "").strip()
-        }
+        
+        # Calculate failure counts per URL
+        failure_counts = {}
+        for r in all_rows:
+            if r.get("status") in ("apply_failed", "apply_error"):
+                url = str(r.get("apply_url", "")).strip()
+                if url:
+                    failure_counts[url] = failure_counts.get(url, 0) + 1
+
+        _PROCESSED_URLS_CACHE = set()
+        
+        for r in all_rows:
+            url = str(r.get("apply_url", "")).strip()
+            if not url:
+                continue
+            
+            # Treat as processed if it succeeded OR if it has failed >= 3 times
+            if r.get("status") in SUCCESSFUL_STATUSES or failure_counts.get(url, 0) >= 3:
+                _PROCESSED_URLS_CACHE.add(url)
+                
         logger.info(
-            "Loaded %d successfully-applied URLs from Google Sheets (cached).",
+            "Loaded %d URLs from Google Sheets (cached). Succeeded or max retries reached.",
             len(_PROCESSED_URLS_CACHE),
         )
         return _PROCESSED_URLS_CACHE
