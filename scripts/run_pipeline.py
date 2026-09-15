@@ -23,7 +23,32 @@ logger = logging.getLogger("run_pipeline")
 RESUMES_DIR = PROJECT_ROOT / "resumes"
 
 # Fix #17: cap JDs processed per run to avoid runaway Groq spend
-MAX_JOBS_PER_RUN = int(os.environ.get("MAX_JOBS_PER_RUN", "50"))
+MAX_JOBS_PER_RUN = int(os.environ.get("MAX_JOBS_PER_RUN", "200"))
+
+# Tiered score thresholds
+SCORE_TAILOR_THRESHOLD = 55   # >= this: AI-tailor resume then apply
+SCORE_VOLUME_FLOOR    = 20   # >= this: apply with best base variant (no tailoring)
+# Score < SCORE_VOLUME_FLOOR → skip entirely
+
+
+RESUMES_DIR = PROJECT_ROOT / "resumes"
+
+
+def _keyword_pick_variant(jd: dict) -> str:
+    """
+    Fast, zero-LLM variant picker for the low-score volume path.
+    Matches job title keywords to the most suitable base resume variant.
+    """
+    title = (jd.get("title", "") + " " + jd.get("description", "")[:200]).lower()
+    if any(k in title for k in ["frontend", "front-end", "react", "vue", "angular", "next.js", "ui engineer", "css"]):
+        return "frontend"
+    if any(k in title for k in ["python", "django", "fastapi", "flask", "data engineer", "ml ", "machine learning"]):
+        return "backend-python"
+    if any(k in title for k in ["ai engineer", "llm", "genai", "mlops", "generative ai"]):
+        return "ai-engineer"
+    if any(k in title for k in ["node", "typescript", "express", "nestjs", "nest.js", "backend"]):
+        return "backend-node"
+    return "backend-node"  # Safe default
 
 def main():
     logger.info("Starting automated job application pipeline...")
@@ -35,12 +60,11 @@ def main():
     except Exception as e:
         logger.error(f"Failed to fetch JDs: {e}", exc_info=True)
         sys.exit(1)
-        
+
     if not jds:
         logger.info("No JDs found. Exiting.")
         return
 
-    # Fix #17: cap per-run volume to control Groq token spend
     if len(jds) > MAX_JOBS_PER_RUN:
         logger.info(f"Capping run to {MAX_JOBS_PER_RUN} JDs (fetched {len(jds)}). Set MAX_JOBS_PER_RUN env var to change.")
         jds = jds[:MAX_JOBS_PER_RUN]
@@ -74,38 +98,77 @@ def main():
             )
             continue
             
-        # 2. Score
+        # 2. Score with Groq (one fast call to get a number)
         logger.info(f"Scoring JD...")
-        time.sleep(3) # Small delay before scoring to help with rate limits
+        time.sleep(2)
         try:
             score_result = score_and_pick(jd)
         except Exception as e:
             logger.error(f"Error scoring JD '{title}' at '{company}': {e}")
             continue
-            
+
         score = score_result.get("score", 0)
         best_variant = score_result.get("best_variant", "N/A")
         reasoning = score_result.get("reasoning", "")
-        
-        if score < 65:
-            logger.info(f"Skipping JD: Score {score} is below threshold 65.")
+
+        # ── Hard floor: completely irrelevant ────────────────────────────
+        if score < SCORE_VOLUME_FLOOR:
+            logger.info(f"Skipping JD: Score {score} below hard floor {SCORE_VOLUME_FLOOR}.")
             log_result(
                 jd=jd,
                 score=score,
                 variant_used=best_variant,
                 status="skipped_low_score",
                 pdf_path="",
-                notes=reasoning[:200]
+                notes=reasoning[:200],
             )
-            time.sleep(5)
+            time.sleep(2)
             continue
-            
-        logger.info(f"JD passed with score {score} using variant '{best_variant}'.")
-            
+
+        # ── Volume path (20 ≤ score < 55): base resume, no tailoring ────
+        if score < SCORE_TAILOR_THRESHOLD:
+            logger.info(f"Volume path: Score {score} — applying with base resume (no tailoring).")
+            base_variant = _keyword_pick_variant(jd)
+            try:
+                variant_path = RESUMES_DIR / f"{base_variant}.json"
+                variant_json = json.loads(variant_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.error(f"Could not load base variant '{base_variant}': {e}")
+                continue
+
+            try:
+                pdf_path = render_pdf(variant_json, company)
+            except Exception as e:
+                logger.error(f"Error rendering base PDF: {e}")
+                log_result(jd, score, base_variant, "render_error", "", str(e)[:200])
+                continue
+
+            dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
+            try:
+                success, apply_notes = apply(jd, pdf_path, dry_run=dry_run)
+                if dry_run and success:
+                    status = "dry_run_success"
+                else:
+                    status = "apply_success_base" if success else "apply_failed"
+            except Exception as e:
+                status = "apply_error"
+                apply_notes = str(e)
+                success = False
+
+            combined_notes = reasoning[:150]
+            if apply_notes:
+                combined_notes = (combined_notes + " | apply_err: " + apply_notes)[:400]
+            log_result(jd=jd, score=score, variant_used=base_variant,
+                       status=status, pdf_path=pdf_path, notes=combined_notes)
+            time.sleep(2)   # Fast path — no Groq, minimal wait
+            continue
+
+        # ── High-quality path (score >= 55): AI-tailor + apply ──────────
+        logger.info(f"High-quality path: Score {score} using variant '{best_variant}' — tailoring resume.")
+
         # 3. Tailor
         logger.info(f"Tailoring resume variant '{best_variant}'...")
         try:
-            # Fix #1: use absolute RESUMES_DIR, not a CWD-relative path
             variant_path = RESUMES_DIR / f"{best_variant}.json"
             variant_json = json.loads(variant_path.read_text(encoding="utf-8"))
             tailored = tailor_resume(variant_json, jd)
@@ -114,7 +177,7 @@ def main():
             log_result(jd, score, best_variant, "tailor_error", "", str(e)[:200])
             time.sleep(5)
             continue
-            
+
         # 4. Render PDF
         logger.info("Rendering tailored PDF...")
         try:
@@ -125,16 +188,17 @@ def main():
             log_result(jd, score, best_variant, "render_error", "", str(e)[:200])
             time.sleep(5)
             continue
-            
+
         # 5. Apply
         logger.info("Applying via ATS...")
         apply_notes = ""
         try:
             dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
             success, apply_notes = apply(jd, pdf_path, dry_run=dry_run)
-            status = "apply_success" if success else "apply_failed"
             if dry_run and success:
                 status = "dry_run_success"
+            else:
+                status = "apply_success_tailored" if success else "apply_failed"
             if apply_notes:
                 logger.warning(f"Apply notes for '{title}' at '{company}': {apply_notes}")
             logger.info(f"Application status: {status}")
@@ -143,7 +207,7 @@ def main():
             status = "apply_error"
             apply_notes = str(e)
             success = False
-            
+
         # 6. Log
         logger.info("Logging result to Google Sheets...")
         try:
@@ -160,10 +224,9 @@ def main():
             )
         except Exception as e:
             logger.error(f"Error logging result: {e}")
-            
-        # Rate limit protection between heavy LLM ops
-        logger.info("Sleeping for 15 seconds to respect Groq rate limits...")
-        time.sleep(15)
+
+        logger.info("Sleeping 10 seconds (high-quality path rate limiting)...")
+        time.sleep(10)
 
     logger.info("Pipeline run complete.")
 

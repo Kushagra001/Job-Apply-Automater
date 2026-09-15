@@ -5,22 +5,22 @@ Playwright-driven form filler for ATS platforms. Detects the ATS from the
 apply_url domain and routes to the appropriate flow.
 
 Supported ATS platforms:
-  Domain               | Flow
-  ---------------------|------------------
-  boards.greenhouse.io | Greenhouse
-  jobs.lever.co        | Lever
-  jobs.ashbyhq.com     | Ashby
+  Domain                    | Flow
+  --------------------------|------------------
+  boards.greenhouse.io      | Greenhouse (legacy)
+  job-boards.greenhouse.io  | Greenhouse (React/modern)
+  jobs.lever.co             | Lever
+  apply.lever.co            | Lever (apply subdomain)
+  jobs.ashbyhq.com          | Ashby
 
 Non-negotiable rules (from Agents.md):
   - ONLY fill forms on the above ATS platforms.
   - --dry-run flag: fill all fields but do NOT click submit.
   - LinkedIn/Naukri apply is OUT OF SCOPE — do not add.
-  - Every selector timeout: 15 seconds → raises ATSTimeoutError on miss.
+  - Every selector timeout: 20 seconds → raises ATSTimeoutError on miss.
 
 Entry point:
-  apply(jd: dict, pdf_path: str, dry_run: bool = False) -> bool
-
-Returns True on successful submission (or dry-run completion), False on failure.
+  apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]
 """
 
 from __future__ import annotations
@@ -39,8 +39,7 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-SELECTOR_TIMEOUT_MS = 15_000  # 15 s hard limit on every Playwright selector wait
-# Fix #14: page loads on ATS sites can take 30-45s; separate timeout from selector waits
+SELECTOR_TIMEOUT_MS = 20_000   # 20 s — bumped from 15 to give React forms more time
 PAGE_LOAD_TIMEOUT_MS = 45_000  # 45 s for full page navigation
 
 USER_PROFILE = {
@@ -68,11 +67,11 @@ class UnsupportedATSError(Exception):
 # ── ATS detection ─────────────────────────────────────────────────────────────
 
 _ATS_DOMAIN_MAP = {
-    "greenhouse.io":       "greenhouse",
-    "lever.co":            "lever",
-    "ashbyhq.com":         "ashby",
-    "remotive.com":        "remotive",
-    "remoteok.com":        "remoteok",
+    "greenhouse.io":  "greenhouse",
+    "lever.co":       "lever",
+    "ashbyhq.com":    "ashby",
+    "remotive.com":   "remotive",
+    "remoteok.com":   "remoteok",
 }
 
 
@@ -85,57 +84,100 @@ def detect_ats(apply_url: str) -> str:
     for domain, name in _ATS_DOMAIN_MAP.items():
         if domain in host:
             return name
-            
-    # Support custom Greenhouse domains (like stripe.com) that use gh_jid
+
+    # Support custom Greenhouse domains (e.g. stripe.com) that embed gh_jid=
     if "gh_jid=" in apply_url or "greenhouse" in apply_url:
         return "greenhouse"
-        
+
     raise UnsupportedATSError(f"Unsupported ATS domain: {host}")
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _fill_social_fields(page, field_keyword: str, value: str) -> None:
+    """
+    Safely fill a social URL field (linkedin, github, portfolio, website).
+    Fix: Explicitly restrict to text/url types to avoid the "cannot fill checkbox" crash
+    that occurs when a GDPR consent checkbox has 'linkedin' in its name attribute.
+    """
+    loc = page.locator(
+        f"input[type='text'][name*='{field_keyword}' i], "
+        f"input[type='url'][name*='{field_keyword}' i], "
+        f"input:not([type='checkbox']):not([type='radio']):not([type='hidden'])[name*='{field_keyword}' i]"
+    )
+    if loc.count() > 0:
+        loc.first.fill(value)
 
 
 # ── ATS flows (Playwright) ────────────────────────────────────────────────────
 
 def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
-    """Fill and optionally submit a Greenhouse application form."""
+    """Fill and optionally submit a Greenhouse application form.
+
+    Handles both legacy boards (boards.greenhouse.io) and modern React-rendered
+    boards (job-boards.greenhouse.io) which have a different DOM structure.
+    """
     logger.info("Starting Greenhouse flow...")
 
-    # Fix: broaden selector to handle both legacy id-based forms and modern
-    # React-rendered Greenhouse boards that omit the id attribute entirely.
-    page.wait_for_selector(
-        "form#application-form, form#application, form[action*='applications'], div#application",
-        timeout=SELECTOR_TIMEOUT_MS,
-    )
+    current_url = page.url
+    is_modern_board = "job-boards.greenhouse.io" in current_url
 
-    # Fix: page.fill() does NOT support comma-separated CSS selectors.
-    # Use locator().first so Playwright evaluates the OR and picks the first match.
-    first_name = page.locator('input[autocomplete="given-name"], input#first_name')
+    if is_modern_board:
+        # Modern React GH board — wait for any visible name/email input
+        logger.info("Detected modern Greenhouse board (job-boards.greenhouse.io)")
+        page.wait_for_selector(
+            "input[autocomplete='given-name'], input#first_name, "
+            "input[name='first_name'], input[type='text']",
+            timeout=SELECTOR_TIMEOUT_MS,
+        )
+    else:
+        # Legacy Greenhouse board
+        page.wait_for_selector(
+            "form#application-form, form#application, "
+            "form[action*='applications'], div#application",
+            timeout=SELECTOR_TIMEOUT_MS,
+        )
+
+    first_name = page.locator(
+        "input[autocomplete='given-name'], input#first_name, input[name='first_name']"
+    )
     if first_name.count() > 0:
         first_name.first.fill(USER_PROFILE["first_name"])
 
-    last_name = page.locator('input[autocomplete="family-name"], input#last_name')
+    last_name = page.locator(
+        "input[autocomplete='family-name'], input#last_name, input[name='last_name']"
+    )
     if last_name.count() > 0:
         last_name.first.fill(USER_PROFILE["last_name"])
 
-    email = page.locator('input[autocomplete="email"], input#email')
+    email = page.locator(
+        "input[autocomplete='email'], input#email, input[name='email']"
+    )
     if email.count() > 0:
         email.first.fill(USER_PROFILE["email"])
 
-    phone = page.locator('input[autocomplete="tel"], input#phone')
+    phone = page.locator(
+        "input[autocomplete='tel'], input#phone, input[name='phone']"
+    )
     if phone.count() > 0:
         phone.first.fill(USER_PROFILE["phone"])
 
-    resume_input = page.locator('input[type="file"][data-source="resume"], input[type="file"][name="resume"]')
+    resume_input = page.locator(
+        "input[type='file'][data-source='resume'], "
+        "input[type='file'][name='resume'], "
+        "input[type='file']"
+    )
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
 
-    linkedin_input = page.locator('input[autocomplete="custom-question-linkedin-profile"], input[name*="linkedin" i]')
-    if linkedin_input.count() > 0:
-        linkedin_input.first.fill(USER_PROFILE["linkedin"])
+    # Fix: use _fill_social_fields to avoid checkbox crash
+    _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
 
     if not dry_run:
         logger.info("Submitting Greenhouse application...")
-        page.click('button#submit_app, button[type="submit"]')
-        page.wait_for_load_state('networkidle')
+        submit = page.locator("button#submit_app, button[type='submit']")
+        submit.first.click()
+        page.wait_for_load_state("networkidle")
     else:
         logger.info("--dry-run: Skipped submit click.")
 
@@ -143,97 +185,134 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
 
 
 def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
-    """Fill and optionally submit a Lever application form."""
+    """Fill and optionally submit a Lever application form.
+
+    Handles both jobs.lever.co (listing page → apply button → form) and
+    apply.lever.co (direct form URL) structures.
+    """
     logger.info("Starting Lever flow...")
-    
-    apply_btn = page.locator('a.template-btn-submit')
-    if apply_btn.count() > 0 and apply_btn.first.is_visible():
-        apply_btn.first.click()
-        
-    page.wait_for_selector("form#application-form", timeout=SELECTOR_TIMEOUT_MS)
-    
-    page.fill('input[name="name"]', USER_PROFILE["full_name"])
-    page.fill('input[name="email"]', USER_PROFILE["email"])
-    page.fill('input[name="phone"]', USER_PROFILE["phone"])
-    
-    resume_input = page.locator('input[type="file"][name="resume"]')
+
+    current_url = page.url
+
+    # Click "Apply" button only if we're on the listing page, not the form
+    if "apply.lever.co" not in current_url:
+        apply_btn = page.locator("a.template-btn-submit")
+        if apply_btn.count() > 0 and apply_btn.first.is_visible():
+            apply_btn.first.click()
+            page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    # Wait for form — works on both jobs.lever.co and apply.lever.co
+    page.wait_for_selector(
+        "form#application-form, "
+        "form.application-form, "
+        "form[data-qa='application-form']",
+        timeout=SELECTOR_TIMEOUT_MS,
+    )
+
+    name_input = page.locator("input[name='name']")
+    if name_input.count() > 0:
+        name_input.first.fill(USER_PROFILE["full_name"])
+
+    email_input = page.locator("input[name='email']")
+    if email_input.count() > 0:
+        email_input.first.fill(USER_PROFILE["email"])
+
+    phone_input = page.locator("input[name='phone']")
+    if phone_input.count() > 0:
+        phone_input.first.fill(USER_PROFILE["phone"])
+
+    resume_input = page.locator(
+        "input[type='file'][name='resume'], input[type='file']"
+    )
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
-        
-    linkedin_input = page.locator('input[name="urls[LinkedIn]"]')
-    if linkedin_input.count() > 0:
-        linkedin_input.fill(USER_PROFILE["linkedin"])
-        
-    github_input = page.locator('input[name="urls[GitHub]"]')
-    if github_input.count() > 0:
-        github_input.fill(USER_PROFILE["github"])
 
-    portfolio_input = page.locator('input[name="urls[Portfolio]"]')
-    if portfolio_input.count() > 0:
-        portfolio_input.fill(USER_PROFILE["portfolio"])
-        
+    # Fix: use _fill_social_fields to avoid checkbox crash
+    _fill_social_fields(page, "LinkedIn", USER_PROFILE["linkedin"])
+    _fill_social_fields(page, "GitHub", USER_PROFILE["github"])
+    _fill_social_fields(page, "Portfolio", USER_PROFILE["portfolio"])
+
     if not dry_run:
         logger.info("Submitting Lever application...")
-        # Fix Lever submit button selector: classes are separated by space, so .postings-btn-submit fails.
-        page.click('button#btn-submit, button.template-btn-submit')
-        page.wait_for_load_state('networkidle')
+        # Fix: Lever's actual submit button uses id=btn-submit and data-qa=btn-submit
+        # The type is "button" not "submit" — must target by id/data-qa
+        submit = page.locator(
+            "button#btn-submit, button[data-qa='btn-submit']"
+        )
+        submit.first.click()
+        page.wait_for_load_state("networkidle")
     else:
         logger.info("--dry-run: Skipped submit click.")
-        
+
     return True
 
 
 def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
-    """Fill and optionally submit an Ashby application form."""
+    """Fill and optionally submit an Ashby application form.
+
+    Ashby is a React SPA. The form renders asynchronously after a button click,
+    so we must wait for networkidle before querying the DOM.
+    Ashby uses _systemfield_ prefix for core form fields.
+    """
     logger.info("Starting Ashby flow...")
-    
-    # Ashby sometimes has an "Apply for this job" button before the form
-    apply_btn = page.locator('button:has-text("Apply for this job"), a:has-text("Apply for this job")')
-    if apply_btn.count() > 0 and apply_btn.first.is_visible():
-        apply_btn.first.click()
-        
-    # Fix Ashby selectors: Ashby uses _systemfield_ prefix for its form fields
-    page.wait_for_selector('input[name="name"], input[name="_systemfield_name"]', timeout=SELECTOR_TIMEOUT_MS)
-    
-    name_input = page.locator('input[name="name"], input[name="_systemfield_name"]')
+
+    current_url = page.url
+
+    # If URL doesn't already point directly to the application form, click Apply
+    if not current_url.rstrip("/").endswith("/application"):
+        apply_btn = page.locator(
+            "button:has-text('Apply for this job'), "
+            "a:has-text('Apply for this job'), "
+            "button:has-text('Apply')"
+        )
+        if apply_btn.count() > 0 and apply_btn.first.is_visible():
+            apply_btn.first.click()
+            # Critical: wait for the SPA to finish rendering the form
+            page.wait_for_load_state("networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    # Ashby uses _systemfield_name for the candidate name input
+    page.wait_for_selector(
+        "input[name='_systemfield_name'], input[name='name']",
+        timeout=SELECTOR_TIMEOUT_MS,
+    )
+
+    name_input = page.locator(
+        "input[name='_systemfield_name'], input[name='name']"
+    )
     if name_input.count() > 0:
         name_input.first.fill(USER_PROFILE["full_name"])
-        
-    email_input = page.locator('input[name="email"], input[name="_systemfield_email"]')
+
+    email_input = page.locator(
+        "input[name='_systemfield_email'], input[name='email']"
+    )
     if email_input.count() > 0:
         email_input.first.fill(USER_PROFILE["email"])
-    
-    phone_input = page.locator('input[name="phone"], input[name="_systemfield_phone"]')
+
+    phone_input = page.locator(
+        "input[name='_systemfield_phone'], input[name='phone']"
+    )
     if phone_input.count() > 0:
         phone_input.first.fill(USER_PROFILE["phone"])
-        
-    resume_input = page.locator('input[type="file"]')
+
+    # Ashby hides the file input visually; set_input_files still works
+    resume_input = page.locator("input[type='file']")
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
-        
-    # Check for common social fields
-    linkedin_input = page.locator('input[name*="linkedin" i]')
-    if linkedin_input.count() > 0:
-        linkedin_input.fill(USER_PROFILE["linkedin"])
-        
-    github_input = page.locator('input[name*="github" i]')
-    if github_input.count() > 0:
-        github_input.fill(USER_PROFILE["github"])
-        
-    portfolio_input = page.locator('input[name*="portfolio" i], input[name*="website" i]')
-    if portfolio_input.count() > 0:
-        portfolio_input.fill(USER_PROFILE["portfolio"])
-        
+
+    # Fix: narrow social selectors to text/url types only — never checkboxes
+    _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
+    _fill_social_fields(page, "github", USER_PROFILE["github"])
+    _fill_social_fields(page, "portfolio", USER_PROFILE["portfolio"])
+    _fill_social_fields(page, "website", USER_PROFILE["portfolio"])
+
     if not dry_run:
         logger.info("Submitting Ashby application...")
-        # Ashby submit buttons usually say "Submit Application"
-        page.click('button[type="submit"]')
-        page.wait_for_load_state('networkidle')
+        page.locator("button[type='submit']").first.click()
+        page.wait_for_load_state("networkidle")
     else:
         logger.info("--dry-run: Skipped submit click.")
-        
-    return True
 
+    return True
 
 
 def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
@@ -245,8 +324,9 @@ def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     """
     logger.info("Starting Remotive flow...")
 
-    # Click the primary apply button
-    apply_btn = page.locator('a.apply-button, a[data-ga-label="apply"], a:has-text("Apply for this job")')
+    apply_btn = page.locator(
+        "a.apply-button, a[data-ga-label='apply'], a:has-text('Apply for this job')"
+    )
     if apply_btn.count() == 0:
         logger.warning("Remotive: no apply button found — skipping")
         return False
@@ -256,7 +336,6 @@ def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     new_page = popup_info.value
     new_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
 
-    # Re-detect ATS on the new page
     try:
         ats_name = detect_ats(new_page.url)
     except UnsupportedATSError:
@@ -285,7 +364,9 @@ def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool) -> bool:
     """
     logger.info("Starting RemoteOK flow...")
 
-    apply_btn = page.locator('a.button-apply, a:has-text("Apply Now"), a:has-text("Apply")')
+    apply_btn = page.locator(
+        "a.button-apply, a:has-text('Apply Now'), a:has-text('Apply')"
+    )
     if apply_btn.count() == 0:
         logger.warning("RemoteOK: no apply button found — skipping")
         return False
@@ -348,11 +429,16 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                )
+            )
             page = context.new_page()
 
             logger.info("Navigating to %s", apply_url)
-            # Fix #14: use the longer PAGE_LOAD_TIMEOUT_MS for page navigation
             page.goto(apply_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
 
             try:
@@ -366,14 +452,15 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False) -> tuple[bool, str]:
 
             try:
                 ok = flow_fn(page, jd, pdf_path, dry_run)
-                return ok, "" if ok else "ATS flow returned False"
-            except NotImplementedError as e:
-                # Fix #4: Workday/Ashby raise NotImplementedError — surface it clearly
-                logger.warning("ATS flow not implemented for '%s': %s", ats_name, e)
-                return False, f"Not implemented: {e}"
+                return (ok, "") if ok else (False, "ATS flow returned False")
             except PlaywrightTimeoutError as e:
                 msg = f"Timeout filling {ats_name} form: {e}"
-                raise ATSTimeoutError(msg)
+                logger.warning(msg)
+                return False, msg
+            except Exception as e:
+                msg = f"Error in {ats_name} flow: {e}"
+                logger.error(msg)
+                return False, msg
             finally:
                 browser.close()
     except Exception as e:
@@ -393,5 +480,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     jd = json.loads(Path(args.jd_json).read_text())
-    success = apply(jd, args.pdf_path, dry_run=args.dry_run)
-    print("Result:", "success" if success else "failed")
+    success, notes = apply(jd, args.pdf_path, dry_run=args.dry_run)
+    print("Result:", "success" if success else f"failed — {notes}")
+

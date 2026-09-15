@@ -88,28 +88,42 @@ def append_row(row: dict) -> None:
 
 def get_processed_urls() -> set[str]:
     """
-    Fetch all previously processed apply_urls from the Google Sheet.
-    Returns an empty set if credentials are missing or an error occurs.
+    Fetch apply_urls from the Google Sheet that were SUCCESSFULLY processed.
+    Only caches apply_success_tailored, apply_success_base, and dry_run_success rows.
+    apply_failed rows are intentionally excluded so they get retried next run.
 
-    Fix #5: result is cached in _PROCESSED_URLS_CACHE so the Sheet is only
+    Fix: result is cached in _PROCESSED_URLS_CACHE so the Sheet is only
     read once per Python process, not on every pipeline run.
     """
     global _PROCESSED_URLS_CACHE
     if _PROCESSED_URLS_CACHE is not None:
         return _PROCESSED_URLS_CACHE
 
+    SUCCESSFUL_STATUSES = {
+        "apply_success_tailored",
+        "apply_success_base",
+        "apply_success",   # legacy — keep for backward compat
+        "dry_run_success",
+    }
+
     try:
         sheet = _get_sheet()
-        # apply_url is the 10th column (1-indexed in gspread)
-        urls = sheet.col_values(10)
-        # Filter out the header "apply_url" and empty strings
-        _PROCESSED_URLS_CACHE = set(u.strip() for u in urls if u.strip() and u.strip() != "apply_url")
-        logger.info("Loaded %d processed URLs from Google Sheets (cached).", len(_PROCESSED_URLS_CACHE))
+        all_rows = sheet.get_all_records()
+        _PROCESSED_URLS_CACHE = {
+            str(r.get("apply_url", "")).strip()
+            for r in all_rows
+            if r.get("status") in SUCCESSFUL_STATUSES
+            and r.get("apply_url", "").strip()
+        }
+        logger.info(
+            "Loaded %d successfully-applied URLs from Google Sheets (cached).",
+            len(_PROCESSED_URLS_CACHE),
+        )
         return _PROCESSED_URLS_CACHE
     except Exception as e:
         logger.warning("Failed to fetch processed URLs from Google Sheets: %s", e)
-        # Return empty set but don't populate cache — allow retry on next invocation
         return set()
+
 
 
 
