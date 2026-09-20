@@ -980,15 +980,23 @@ _ATS_FLOW_MAP = {
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = "") -> tuple[bool, str]:
+def apply(
+    jd: dict,
+    pdf_path: str,
+    dry_run: bool = False,
+    cover_letter: str = "",
+    use_persistent_profile: bool = False,
+) -> tuple[bool, str]:
     """
     Detect ATS and run the appropriate Playwright form-fill flow.
 
     Args:
-        jd:           JD dict (from fetch_jds.py)
-        pdf_path:     Absolute path to the tailored resume PDF
-        dry_run:      If True, fill fields but do not click submit
-        cover_letter: Generated cover letter text to paste into textarea
+        jd:                     JD dict (from fetch_jds.py)
+        pdf_path:               Absolute path to the tailored resume PDF
+        dry_run:                If True, fill fields but do not click submit
+        cover_letter:           Generated cover letter text to paste into textarea
+        use_persistent_profile: If True, uses a persistent Chrome user data directory
+                                to reuse saved sessions/cookies and minimize captcha challenges.
 
     Returns:
         (success: bool, notes: str) — notes contains failure reason or confirmation details.
@@ -1006,15 +1014,29 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = ""
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0.0.0 Safari/537.36"
-                )
+            user_agent = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
             )
-            page = context.new_page()
+            persistent_env = os.environ.get("PLAYWRIGHT_PERSISTENT_PROFILE", "").lower() in ("true", "1", "yes")
+            browser = None
+
+            if use_persistent_profile or persistent_env:
+                profile_dir = Path(__file__).resolve().parent.parent / "data" / "browser_profile"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                logger.info("Launching Playwright with persistent profile at %s", profile_dir)
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_dir),
+                    headless=True,
+                    user_agent=user_agent,
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+            else:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(user_agent=user_agent)
+                page = context.new_page()
+
             Stealth().apply_stealth_sync(page)
 
             logger.info("Navigating to %s", apply_url)
@@ -1043,7 +1065,10 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = ""
                 logger.error(msg)
                 return False, msg
             finally:
-                browser.close()
+                if browser:
+                    browser.close()
+                else:
+                    context.close()
     except Exception as e:
         logger.error("Exception in apply: %s", e)
         return False, str(e)
@@ -1058,9 +1083,16 @@ if __name__ == "__main__":
     parser.add_argument("pdf_path", help="Path to tailored resume PDF")
     parser.add_argument("--dry-run", action="store_true",
                         help="Fill form but do NOT submit")
+    parser.add_argument("--persistent-profile", action="store_true",
+                        help="Use persistent browser user-data directory for cookies/sessions")
     args = parser.parse_args()
 
     jd = json.loads(Path(args.jd_json).read_text())
-    success, notes = apply(jd, args.pdf_path, dry_run=args.dry_run)
+    success, notes = apply(
+        jd,
+        args.pdf_path,
+        dry_run=args.dry_run,
+        use_persistent_profile=args.persistent_profile,
+    )
     print("Result:", "success" if success else f"failed — {notes}")
 

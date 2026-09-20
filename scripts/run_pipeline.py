@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import time
@@ -9,7 +10,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.fetch_jds import fetch_all
+from scripts.fetch_jds import fetch_all, _requires_senior_experience
+from scripts.enrich_jd import enrich_jd
+from scripts.doctor import run_doctor
 from scripts.score_and_pick import score_and_pick
 from scripts.tailor_resume import tailor_resume
 from scripts.render_pdf import render_pdf
@@ -31,7 +34,13 @@ SCORE_VOLUME_FLOOR    = 20   # >= this: apply with best base variant (no tailori
 # Score < SCORE_VOLUME_FLOOR → skip entirely
 
 
-RESUMES_DIR = PROJECT_ROOT / "resumes"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Automated Job Application Pipeline")
+    parser.add_argument("--doctor", action="store_true", help="Run pre-flight health diagnostics and exit")
+    parser.add_argument("--persistent-profile", action="store_true", help="Use persistent browser user-data directory for cookies/sessions")
+    parser.add_argument("--dry-run", action="store_true", help="Run in dry-run mode (do not submit applications)")
+    parser.add_argument("--max-jobs", type=int, default=None, help="Maximum number of JDs to process this run")
+    return parser.parse_args()
 
 
 def _keyword_pick_variant(jd: dict) -> str:
@@ -55,7 +64,16 @@ def _keyword_pick_variant(jd: dict) -> str:
     return "backend-node"  # Safe default
 
 def main():
+    args = parse_args()
+    if args.doctor:
+        healthy = run_doctor()
+        sys.exit(0 if healthy else 1)
+
     logger.info("Starting automated job application pipeline...")
+
+    dry_run = args.dry_run or os.environ.get("DRY_RUN", "false").lower() == "true"
+    use_persistent = args.persistent_profile or os.environ.get("PLAYWRIGHT_PERSISTENT_PROFILE", "").lower() in ("true", "1", "yes")
+    max_jobs = args.max_jobs if args.max_jobs is not None else MAX_JOBS_PER_RUN
     
     # 1. Fetch JDs
     logger.info("Fetching JDs from all sources...")
@@ -84,9 +102,9 @@ def main():
     logger.info(f"Deduplicated JDs: {len(jds)} raw -> {len(unique_jds)} unique.")
     jds = unique_jds
 
-    if len(jds) > MAX_JOBS_PER_RUN:
-        logger.info(f"Capping run to {MAX_JOBS_PER_RUN} JDs (fetched {len(jds)}). Set MAX_JOBS_PER_RUN env var to change.")
-        jds = jds[:MAX_JOBS_PER_RUN]
+    if len(jds) > max_jobs:
+        logger.info(f"Capping run to {max_jobs} JDs (fetched {len(jds)}). Set --max-jobs or MAX_JOBS_PER_RUN env var to change.")
+        jds = jds[:max_jobs]
 
     logger.info(f"Fetched {len(jds)} unique JDs. Processing...")
 
@@ -117,6 +135,23 @@ def main():
                 notes="Skipped before scoring due to unsupported ATS."
             )
             continue
+
+        # JD Description Enrichment (Agent-Reach pattern):
+        # If description is sparse (<250 chars), retrieve full description from ATS API or Jina Reader before scoring
+        if len(jd.get("description", "").strip()) < 250:
+            logger.info(f"Description sparse (<250 chars); attempting enrichment for '{title}'...")
+            jd = enrich_jd(jd)
+            if _requires_senior_experience(jd.get("description", "")):
+                logger.info(f"Enriched JD requires senior experience (>=3 yrs). Skipping '{title}' at '{company}'.")
+                log_result(
+                    jd=jd,
+                    score=0,
+                    variant_used="N/A",
+                    status="skipped_senior_role",
+                    pdf_path="",
+                    notes="Filtered out after description enrichment (requires >= 3 years experience)."
+                )
+                continue
             
         # 2. Score with Groq (one fast call to get a number)
         logger.info(f"Scoring JD...")
@@ -163,9 +198,13 @@ def main():
                 log_result(jd, score, base_variant, "render_error", "", str(e)[:200])
                 continue
 
-            dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
             try:
-                success, apply_notes = apply(jd, pdf_path, dry_run=dry_run)
+                success, apply_notes = apply(
+                    jd,
+                    pdf_path,
+                    dry_run=dry_run,
+                    use_persistent_profile=use_persistent,
+                )
                 if dry_run and success:
                     status = "dry_run_success"
                 else:
@@ -218,9 +257,14 @@ def main():
         logger.info("Applying via ATS...")
         apply_notes = ""
         try:
-            dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
             cl = tailored.get("cover_letter", "")
-            success, apply_notes = apply(jd, pdf_path, dry_run=dry_run, cover_letter=cl)
+            success, apply_notes = apply(
+                jd,
+                pdf_path,
+                dry_run=dry_run,
+                cover_letter=cl,
+                use_persistent_profile=use_persistent,
+            )
             if dry_run and success:
                 status = "dry_run_success"
             else:
