@@ -56,6 +56,8 @@ REMOTEOK_URL = "https://remoteok.com/api"
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
 JOBICY_URL = "https://jobicy.com/api/v2/remote-jobs"
 ARBEITNOW_URL = "https://www.arbeitnow.com/api/job-board-api"
+HIMALAYAS_URL = "https://himalayas.app/jobs/api"
+SIMPLIFY_URL = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"
 REMOTEOK_LIMIT = 150
 REMOTIVE_LIMIT = 150
 JOBICY_LIMIT = 50
@@ -97,6 +99,14 @@ ASHBY_COMPANIES = [
 LEVER_COMPANIES = [
     # Verified active Lever boards (including India giants & global tech)
     "cred", "meesho", "paytm", "binance", "spotify",
+]
+
+YC_COMPANIES = [
+    # Fast-growing YC AI and devtool startups on Ashby / Greenhouse
+    "resend", "cursor", "firecrawl", "browserbase", "greptile",
+    "baseten", "decagon", "tavus", "posthog", "dagger",
+    "warp", "cartesia", "mendable", "superhuman", "modal-labs",
+    "retool", "monzo", "anysphere",
 ]
 
 # ── Relevance keyword filter ───────────────────────────────────────────────────
@@ -179,9 +189,9 @@ SUPER_SENIOR: tuple[str, ...] = (
     "engineering manager", "senior manager",
 )
 
-# India target locations
+# India target locations (precise tokens to avoid false matches on 'in' preposition or Indiana)
 INDIA_KEYWORDS: frozenset[str] = frozenset([
-    "india", " in ", "india,", "bangalore", "bengaluru", "mumbai",
+    "india", "india,", ", in", "(in)", " - in", "/in", "bangalore", "bengaluru", "mumbai",
     "pune", "hyderabad", "chennai", "delhi", "gurugram", "noida",
     "kolkata", "ahmedabad", "jaipur", "rajasthan", "remote india", "india remote",
 ])
@@ -267,9 +277,10 @@ def is_location_ok(location: str, remote: bool) -> bool:
     """
     loc = (location or "").lower().strip()
 
-    # Explicit India location is always OK
-    if any(kw in loc for kw in INDIA_KEYWORDS):
-        return True
+    # Explicit India location is always OK (avoiding Indiana / Indianapolis false positives)
+    if "indiana" not in loc and "indianapolis" not in loc:
+        if any(kw in loc for kw in INDIA_KEYWORDS):
+            return True
 
     # If not remote and not in India, cannot work onsite
     if not remote:
@@ -805,6 +816,146 @@ def fetch_hackernews() -> list[dict]:
     return listings
 
 
+# ── Himalayas Remote Fetcher ──────────────────────────────────────────────────
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
+def fetch_himalayas(limit: int = 40) -> list[dict]:
+    """
+    Fetch remote tech jobs from Himalayas API.
+    Queries entry-level and junior roles, normalizes to canonical JD schema,
+    and filters for tech relevance, location suitability, and experience caps.
+    """
+    listings: list[dict] = []
+    offsets = [0, 20] if limit > 20 else [0]
+    for offset in offsets:
+        try:
+            params = {"seniority": "entry-level,junior", "offset": offset}
+            resp = requests.get(HIMALAYAS_URL, params=params, headers=HEADERS, timeout=20)
+            if resp.status_code != 200:
+                logger.warning("fetch_himalayas — HTTP %s at offset %s", resp.status_code, offset)
+                continue
+            data = resp.json()
+            jobs = data.get("jobs", [])
+            for item in jobs:
+                title = (item.get("title") or "").strip()
+                company = (item.get("companyName") or "").strip()
+                if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+                    continue
+                loc_restrictions = item.get("locationRestrictions") or []
+                location = ", ".join(loc_restrictions) if loc_restrictions else "Worldwide"
+                remote = True
+                if not is_location_ok(location, remote):
+                    continue
+                description = _strip_html(item.get("description", "") or item.get("excerpt", ""))
+                if _requires_senior_experience(description):
+                    continue
+                apply_url = (item.get("applicationLink") or "").strip()
+                if not apply_url:
+                    continue
+                listings.append(_jd(
+                    title=title,
+                    company=company,
+                    location=location,
+                    remote=remote,
+                    description=description,
+                    apply_url=apply_url,
+                    source="himalayas",
+                ))
+        except Exception as e:
+            logger.error("fetch_himalayas — offset %s error: %s", offset, e)
+    logger.info("fetch_himalayas — %d listings", len(listings))
+    return listings
+
+
+# ── SimplifyJobs Early-Career Feed ────────────────────────────────────────────
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
+def fetch_simplify_jobs() -> list[dict]:
+    """
+    Fetch active new-grad / entry-level positions from SimplifyJobs public feed.
+    Pre-validates that apply URLs point to legitimate ATS postings (Ashby, Greenhouse, Lever).
+    """
+    from scripts.auto_apply_ats import validate_ats_job_url
+    listings: list[dict] = []
+    try:
+        resp = requests.get(SIMPLIFY_URL, headers=HEADERS, timeout=25)
+        if resp.status_code != 200:
+            logger.warning("fetch_simplify_jobs — HTTP %s", resp.status_code)
+            return []
+        items = resp.json()
+        for item in items:
+            if not item.get("active") or not item.get("is_visible", True):
+                continue
+            title = (item.get("title") or "").strip()
+            company = (item.get("company_name") or "").strip()
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+                continue
+            locations = item.get("locations") or []
+            loc_str = ", ".join(locations) if locations else "Remote"
+            remote = _is_remote(loc_str) or any("remote" in l.lower() for l in locations)
+            if not is_location_ok(loc_str, remote):
+                continue
+            apply_url = (item.get("url") or "").strip()
+            is_valid, _ = validate_ats_job_url(apply_url)
+            if not is_valid:
+                continue
+            category = item.get("category", "Software Engineering")
+            description = f"Company: {company}. Role: {title}. Category: {category}. Locations: {loc_str}."
+            listings.append(_jd(
+                title=title,
+                company=company,
+                location=loc_str,
+                remote=remote,
+                description=description,
+                apply_url=apply_url,
+                source="simplify",
+            ))
+    except Exception as e:
+        logger.error("fetch_simplify_jobs — error: %s", e)
+    logger.info("fetch_simplify_jobs — %d listings", len(listings))
+    return listings
+
+
+# ── Y-Combinator High-Growth Startups Discovery ────────────────────────────────
+
+def fetch_yc_jobs(slugs: list[str] | None = None) -> list[dict]:
+    """
+    Discover tech jobs from high-growth Y-Combinator startups hosted on Ashby and Greenhouse.
+    Concurrently queries posting APIs and normalizes them into canonical JDs.
+    """
+    slugs = slugs or YC_COMPANIES
+    listings: list[dict] = []
+
+    def _query_yc_board(slug: str) -> list[dict]:
+        found: list[dict] = []
+        ashby_jobs = _fetch_single_ashby(slug)
+        for j in ashby_jobs:
+            j["source"] = "yc_startups"
+            found.append(j)
+        gh_jobs = _fetch_single_greenhouse(slug)
+        for j in gh_jobs:
+            j["source"] = "yc_startups"
+            found.append(j)
+        return found
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_query_yc_board, slug) for slug in slugs]
+        for f in as_completed(futures):
+            listings.extend(f.result())
+
+    listings = _dedup(listings)
+    logger.info("fetch_yc_jobs — %d total listings from %d YC companies", len(listings), len(slugs))
+    return listings
+
+
 # ── Main fetch_all with Source Balancing ─────────────────────────────────────
 
 def fetch_all() -> list[dict]:
@@ -816,14 +967,17 @@ def fetch_all() -> list[dict]:
     Jobicy, Arbeitnow, RemoteOK, Remotive, or HackerNews!
     """
     sources = [
-        ("ashby",      fetch_ashby),
-        ("lever",      fetch_lever),
-        ("jobicy",     fetch_jobicy),
-        ("arbeitnow",  fetch_arbeitnow),
-        ("greenhouse", fetch_greenhouse),
-        ("remoteok",   fetch_remoteok),
-        ("remotive",   fetch_remotive),
-        ("hackernews", fetch_hackernews),
+        ("ashby",       fetch_ashby),
+        ("lever",       fetch_lever),
+        ("jobicy",      fetch_jobicy),
+        ("arbeitnow",   fetch_arbeitnow),
+        ("greenhouse",  fetch_greenhouse),
+        ("remoteok",    fetch_remoteok),
+        ("remotive",    fetch_remotive),
+        ("hackernews",  fetch_hackernews),
+        ("himalayas",   fetch_himalayas),
+        ("simplify",    fetch_simplify_jobs),
+        ("yc_startups", fetch_yc_jobs),
     ]
 
     all_by_source: dict[str, list[dict]] = collections.defaultdict(list)
@@ -874,7 +1028,10 @@ def fetch_all() -> list[dict]:
         src_list.sort(key=lambda j: 0 if j.get("remote") else 1)
 
     # Round-Robin Interleave across sources
-    source_order = ["ashby", "lever", "jobicy", "arbeitnow", "remoteok", "remotive", "greenhouse", "hackernews"]
+    source_order = [
+        "ashby", "lever", "jobicy", "arbeitnow", "remoteok", "remotive",
+        "greenhouse", "hackernews", "himalayas", "simplify", "yc_startups",
+    ]
     interleaved: list[dict] = []
     max_count = max((len(lst) for lst in grouped.values()), default=0)
 
@@ -909,14 +1066,17 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         source = sys.argv[1].lower()
         fn_map = {
-            "greenhouse": fetch_greenhouse,
-            "lever":      fetch_lever,
-            "ashby":      fetch_ashby,
-            "hackernews": fetch_hackernews,
-            "remoteok":   fetch_remoteok,
-            "remotive":   fetch_remotive,
-            "jobicy":     fetch_jobicy,
-            "arbeitnow":  fetch_arbeitnow,
+            "greenhouse":  fetch_greenhouse,
+            "lever":       fetch_lever,
+            "ashby":       fetch_ashby,
+            "hackernews":  fetch_hackernews,
+            "remoteok":    fetch_remoteok,
+            "remotive":    fetch_remotive,
+            "jobicy":      fetch_jobicy,
+            "arbeitnow":   fetch_arbeitnow,
+            "himalayas":   fetch_himalayas,
+            "simplify":    fetch_simplify_jobs,
+            "yc_startups": fetch_yc_jobs,
         }
         if source not in fn_map:
             print(f"Unknown source '{source}'. Choose from: {', '.join(fn_map)}")

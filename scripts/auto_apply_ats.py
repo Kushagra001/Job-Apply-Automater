@@ -55,6 +55,24 @@ USER_PROFILE = {
     "portfolio": "https://www.stack-form.dev/",
 }
 
+CANDIDATE_QA_PROFILE = {
+    "full_name": USER_PROFILE["full_name"],
+    "email": USER_PROFILE["email"],
+    "phone": USER_PROFILE["phone_international"],
+    "location": "Jaipur, Rajasthan, India",
+    "willing_to_relocate": "Yes, open to relocation or remote work worldwide",
+    "work_authorization": "Authorized to work in India; open to remote contract or direct hire worldwide",
+    "visa_sponsorship": "Will require visa sponsorship for onsite positions outside India; none required for remote roles",
+    "education": "Master of Computer Applications (MCA), Poornima University, CGPA: 9.03/10 (2023-2025); Bachelor of Computer Applications (BCA), CGPA: 8.20/10",
+    "experience_years": "1-2 years of professional software engineering & development experience (early career / junior)",
+    "notice_period": "Immediate / 0 days (available to join immediately)",
+    "expected_salary": "$60,000 - $75,000 USD / competitive market rate (flexible)",
+    "linkedin": USER_PROFILE["linkedin"],
+    "github": USER_PROFILE["github"],
+    "portfolio": USER_PROFILE["portfolio"],
+    "core_skills": "Python, JavaScript, TypeScript, React, Next.js, Node.js, FastAPI, PostgreSQL, MongoDB, Docker, Git, REST APIs, Playwright, pytest, automated testing, CI/CD",
+}
+
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
@@ -76,6 +94,7 @@ _ATS_DOMAIN_MAP = {
     "remoteok.com":   "remoteok",
     "arbeitnow.com":  "arbeitnow",
     "jobicy.com":     "jobicy",
+    "himalayas.app":  "himalayas",
 }
 
 
@@ -132,6 +151,53 @@ def validate_ats_job_url(apply_url: str) -> tuple[bool, str]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _human_type(locator, text: str, min_delay_ms: int = 15, max_delay_ms: int = 40) -> None:
+    """
+    Types text into locator with simulated human keystroke delays (15ms - 40ms)
+    instead of instant value injection, evading heuristic bot detection.
+    """
+    try:
+        import random
+        locator.focus()
+        locator.clear()
+        delay = random.randint(min_delay_ms, max_delay_ms)
+        locator.press_sequentially(text, delay=delay)
+    except Exception:
+        locator.fill(text)
+
+
+def _detect_captcha(page) -> bool:
+    """
+    Check if the page has an active Cloudflare Turnstile, reCAPTCHA, hCaptcha,
+    or blocking security challenge.
+    """
+    try:
+        captcha_selectors = [
+            "iframe[src*='challenges.cloudflare.com']",
+            "iframe[src*='recaptcha']",
+            "iframe[src*='hcaptcha']",
+            "iframe[src*='arkoselabs']",
+            ".cf-turnstile", "#cf-turnstile",
+            ".g-recaptcha", ".h-captcha",
+            "div[id*='captcha']", "div[class*='captcha']",
+        ]
+        for sel in captcha_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                logger.warning("Active captcha detected via selector: %s", sel)
+                return True
+
+        title = page.title().lower()
+        if any(w in title for w in ["just a moment", "attention required", "security check", "challenge"]):
+            logger.warning("Active challenge page detected via title: '%s'", page.title())
+            return True
+
+        return False
+    except Exception as e:
+        logger.debug("Captcha detection non-fatal error: %s", e)
+        return False
+
+
 def _fill_social_fields(page, field_keyword: str, value: str) -> None:
     """
     Safely fill a social URL field (linkedin, github, portfolio, website).
@@ -143,7 +209,7 @@ def _fill_social_fields(page, field_keyword: str, value: str) -> None:
         f"input:not([type='checkbox']):not([type='radio']):not([type='hidden'])[name*='{field_keyword}' i]"
     )
     if loc.count() > 0:
-        loc.first.fill(value)
+        _human_type(loc.first, value)
 
 
 def _fill_common_custom_fields(page) -> None:
@@ -217,6 +283,177 @@ def _fill_common_custom_fields(page) -> None:
                 pass
     except Exception as e:
         logger.debug("Non-fatal issue filling custom fields: %s", e)
+
+
+def _answer_custom_questions(page, jd: dict) -> None:
+    """
+    Inspects modern ATS application forms (Ashby, Greenhouse, Lever) for unfilled
+    custom or mandatory fields (text inputs, textareas, selects) and uses Groq
+    to generate concise, truthful answers matching the candidate's profile.
+    """
+    try:
+        # 1. Identify unfilled interactive textareas, inputs, and selects via client-side DOM query
+        elements_data = page.evaluate("""() => {
+            const results = [];
+            let counter = 0;
+
+            function getLabel(el) {
+                if (el.id) {
+                    const l = document.querySelector(`label[for='${el.id}']`);
+                    if (l && l.innerText.trim()) return l.innerText.trim();
+                }
+                const parentLabel = el.closest('label');
+                if (parentLabel && parentLabel.innerText.trim()) return parentLabel.innerText.trim();
+                const parentField = el.closest('.field, .form-group, div[class*="field"], div[class*="question"], div[data-testid*="question"]');
+                if (parentField) {
+                    const labelEl = parentField.querySelector('label, h3, h4, span[class*="label"], div[class*="label"], p[class*="label"]');
+                    if (labelEl && labelEl.innerText.trim()) return labelEl.innerText.trim();
+                }
+                return el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+            }
+
+            const standardKeywords = ['first_name', 'last_name', 'email', 'phone', 'resume', 'cv', 'linkedin', 'github', 'portfolio', 'website'];
+
+            // Visible empty textareas
+            document.querySelectorAll('textarea').forEach(ta => {
+                if (ta.offsetParent !== null && !ta.value.trim()) {
+                    const name = (ta.name || '').toLowerCase();
+                    if (name.includes('cover') || name.includes('letter')) return;
+                    const label = getLabel(ta);
+                    if (label && label.length > 2) {
+                        const qId = 'custom_field_' + (counter++);
+                        ta.setAttribute('data-ag-id', qId);
+                        results.push({ id: qId, tag: 'textarea', label: label.slice(0, 200) });
+                    }
+                }
+            });
+
+            // Visible empty text/number inputs
+            document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])').forEach(inp => {
+                if (inp.offsetParent !== null && !inp.value.trim()) {
+                    const name = (inp.name || '').toLowerCase();
+                    const idAttr = (inp.id || '').toLowerCase();
+                    if (standardKeywords.some(k => name.includes(k) || idAttr.includes(k))) return;
+                    const label = getLabel(inp);
+                    if (label && label.length > 2) {
+                        const qId = 'custom_field_' + (counter++);
+                        inp.setAttribute('data-ag-id', qId);
+                        results.push({ id: qId, tag: 'input', label: label.slice(0, 200) });
+                    }
+                }
+            });
+
+            // Visible unselected dropdowns
+            document.querySelectorAll('select').forEach(sel => {
+                if (sel.offsetParent !== null) {
+                    const name = (sel.name || '').toLowerCase();
+                    if (standardKeywords.some(k => name.includes(k))) return;
+                    const selectedOpt = sel.options[sel.selectedIndex];
+                    const val = selectedOpt ? selectedOpt.value.trim() : '';
+                    const text = selectedOpt ? selectedOpt.text.trim().toLowerCase() : '';
+                    if (!val || text.includes('select') || text.includes('choose')) {
+                        const label = getLabel(sel);
+                        const options = Array.from(sel.options).map(o => o.text.trim()).filter(t => t && !t.toLowerCase().includes('select'));
+                        if (label && options.length > 0) {
+                            const qId = 'custom_field_' + (counter++);
+                            sel.setAttribute('data-ag-id', qId);
+                            results.push({ id: qId, tag: 'select', label: label.slice(0, 200), options: options.slice(0, 10) });
+                        }
+                    }
+                }
+            });
+
+            return results;
+        }""")
+
+        if not elements_data:
+            logger.debug("No unfilled custom questions detected on page.")
+            return
+
+        logger.info("Found %d unfilled custom questions: %s", len(elements_data), [e["label"][:40] for e in elements_data])
+
+        # 2. Query Groq with candidate profile in a single fast call
+        from groq import Groq
+        groq_client = Groq()
+        questions_payload = [
+            {"id": e["id"], "type": e["tag"], "question": e["label"], "options": e.get("options", [])}
+            for e in elements_data
+        ]
+
+        prompt = f"""
+You are an expert candidate assistant filling out ATS job application questions.
+Candidate Profile:
+{json.dumps(CANDIDATE_QA_PROFILE, indent=2)}
+
+Job Details:
+Title: {jd.get('title', '')}
+Company: {jd.get('company', '')}
+
+Questions to answer:
+{json.dumps(questions_payload, indent=2)}
+
+Instructions:
+1. Provide accurate, truthful, professional, and concise answers for each question based on the candidate's profile.
+2. For textarea questions (e.g. 'Why do you want to work here?'), write 2-3 genuine, impactful sentences.
+3. For select/dropdown questions, return EXACTLY one of the provided options that best matches.
+4. For salary questions, state market standard / competitive or realistic entry-level number (e.g. 65000) if numeric.
+5. Return JSON format mapping question ID to the answer string:
+   {{"custom_field_0": "answer", ...}}
+"""
+        models_to_try = ["openai/gpt-oss-20b", "groq/compound-mini", "groq/compound"]
+        answers = {}
+        for m in models_to_try:
+            try:
+                resp = groq_client.chat.completions.create(
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": "You output JSON only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                )
+                answers = json.loads(resp.choices[0].message.content)
+                if isinstance(answers, list) and answers:
+                    answers = answers[0]
+                break
+            except Exception as exc:
+                logger.warning("Groq custom QA call with model %s failed: %s", m, exc)
+
+        # 3. Fill the answers into the DOM elements
+        for item in elements_data:
+            q_id = item["id"]
+            ans = answers.get(q_id)
+            if not ans:
+                continue
+
+            tag = item["tag"]
+            loc = page.locator(f"[data-ag-id='{q_id}']")
+            if loc.count() == 0:
+                continue
+
+            try:
+                if tag in ("textarea", "input"):
+                    loc.first.fill(str(ans))
+                    logger.info("Filled custom field [%s]: %s", item['label'][:30], str(ans)[:50])
+                elif tag == "select":
+                    sel = loc.first
+                    options = sel.locator("option").all()
+                    matched = False
+                    ans_lower = str(ans).lower().strip()
+                    for idx, opt in enumerate(options):
+                        opt_text = opt.inner_text().strip().lower()
+                        if opt_text == ans_lower or ans_lower in opt_text:
+                            sel.select_option(index=idx)
+                            matched = True
+                            break
+                    if not matched and len(options) > 1:
+                        sel.select_option(index=1)
+            except Exception as fill_err:
+                logger.debug("Failed to fill custom field %s: %s", q_id, fill_err)
+
+    except Exception as e:
+        logger.warning("Error during custom question answering: %s", e)
 
 
 def _verify_submission(page, ats_name: str) -> tuple[bool, str]:
@@ -305,28 +542,28 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter
         "input[autocomplete='given-name'], input#first_name, input[name='first_name']"
     )
     if first_name.count() > 0:
-        first_name.first.fill(USER_PROFILE["first_name"])
+        _human_type(first_name.first, USER_PROFILE["first_name"])
         last_name = page.locator(
             "input[autocomplete='family-name'], input#last_name, input[name='last_name']"
         )
         if last_name.count() > 0:
-            last_name.first.fill(USER_PROFILE["last_name"])
+            _human_type(last_name.first, USER_PROFILE["last_name"])
     else:
         full_name = page.locator("input[autocomplete='name'], input#name, input[name='name']")
         if full_name.count() > 0:
-            full_name.first.fill(USER_PROFILE["full_name"])
+            _human_type(full_name.first, USER_PROFILE["full_name"])
 
     email = page.locator(
         "input[autocomplete='email'], input#email, input[name='email']"
     )
     if email.count() > 0:
-        email.first.fill(USER_PROFILE["email"])
+        _human_type(email.first, USER_PROFILE["email"])
 
     phone = page.locator(
         "input[autocomplete='tel'], input#phone, input[name='phone']"
     )
     if phone.count() > 0:
-        phone.first.fill(USER_PROFILE["phone_international"])
+        _human_type(phone.first, USER_PROFILE["phone_international"])
 
     resume_input = page.locator(
         "input[type='file'][data-source='resume'], "
@@ -338,11 +575,16 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter
 
     _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
     _fill_common_custom_fields(page)
+    _answer_custom_questions(page, jd)
 
     if cover_letter:
         cl_input = page.locator("textarea[name*='cover_letter' i], textarea#cover_letter_text, textarea[name*='comments' i]")
         if cl_input.count() > 0:
-            cl_input.first.fill(cover_letter)
+            _human_type(cl_input.first, cover_letter, min_delay_ms=5, max_delay_ms=15)
+
+    if _detect_captcha(page):
+        logger.warning("Active captcha detected on Greenhouse form for %s", jd.get("company"))
+        return False, "requires_captcha: Cloudflare or reCAPTCHA detected"
 
     if not dry_run:
         logger.info("Submitting Greenhouse application...")
@@ -379,15 +621,15 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
 
     name_input = page.locator("input[name='name'], input#name, input[autocomplete='name']")
     if name_input.count() > 0:
-        name_input.first.fill(USER_PROFILE["full_name"])
+        _human_type(name_input.first, USER_PROFILE["full_name"])
 
     email_input = page.locator("input[name='email'], input#email, input[autocomplete='email']")
     if email_input.count() > 0:
-        email_input.first.fill(USER_PROFILE["email"])
+        _human_type(email_input.first, USER_PROFILE["email"])
 
     phone_input = page.locator("input[name='phone'], input#phone, input[autocomplete='tel']")
     if phone_input.count() > 0:
-        phone_input.first.fill(USER_PROFILE["phone"])
+        _human_type(phone_input.first, USER_PROFILE["phone"])
 
     resume_input = page.locator(
         "input[type='file'][name='resume'], input[type='file']"
@@ -399,11 +641,16 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     _fill_social_fields(page, "GitHub", USER_PROFILE["github"])
     _fill_social_fields(page, "Portfolio", USER_PROFILE["portfolio"])
     _fill_common_custom_fields(page)
+    _answer_custom_questions(page, jd)
 
     if cover_letter:
         cl_input = page.locator("textarea[name*='comments' i], textarea[name*='cover' i]")
         if cl_input.count() > 0:
-            cl_input.first.fill(cover_letter)
+            _human_type(cl_input.first, cover_letter, min_delay_ms=5, max_delay_ms=15)
+
+    if _detect_captcha(page):
+        logger.warning("Active captcha detected on Lever form for %s", jd.get("company"))
+        return False, "requires_captcha: Cloudflare or reCAPTCHA detected"
 
     if not dry_run:
         logger.info("Submitting Lever application...")
@@ -451,19 +698,19 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
         "input[name='_systemfield_name'], input[name='name']"
     )
     if name_input.count() > 0:
-        name_input.first.fill(USER_PROFILE["full_name"])
+        _human_type(name_input.first, USER_PROFILE["full_name"])
 
     email_input = page.locator(
         "input[name='_systemfield_email'], input[name='email']"
     )
     if email_input.count() > 0:
-        email_input.first.fill(USER_PROFILE["email"])
+        _human_type(email_input.first, USER_PROFILE["email"])
 
     phone_input = page.locator(
         "input[name='_systemfield_phone'], input[name='phone']"
     )
     if phone_input.count() > 0:
-        phone_input.first.fill(USER_PROFILE["phone"])
+        _human_type(phone_input.first, USER_PROFILE["phone"])
 
     resume_input = page.locator("input[type='file']")
     if resume_input.count() > 0:
@@ -474,11 +721,16 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     _fill_social_fields(page, "portfolio", USER_PROFILE["portfolio"])
     _fill_social_fields(page, "website", USER_PROFILE["portfolio"])
     _fill_common_custom_fields(page)
+    _answer_custom_questions(page, jd)
 
     if cover_letter:
         cl_input = page.locator("textarea[name*='coverLetter' i], textarea[name*='comments' i], textarea[name*='message' i]")
         if cl_input.count() > 0:
-            cl_input.first.fill(cover_letter)
+            _human_type(cl_input.first, cover_letter, min_delay_ms=5, max_delay_ms=15)
+
+    if _detect_captcha(page):
+        logger.warning("Active captcha detected on Ashby form for %s", jd.get("company"))
+        return False, "requires_captcha: Cloudflare or reCAPTCHA detected"
 
     if not dry_run:
         logger.info("Submitting Ashby application...")
@@ -664,6 +916,56 @@ def _apply_jobicy(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: st
             target_page.close()
 
 
+def _apply_himalayas(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Handles Himalayas job apply redirect or embedded application."""
+    logger.info("Starting Himalayas flow...")
+    if _detect_captcha(page):
+        return False, "requires_captcha: Security challenge detected on Himalayas page"
+
+    apply_btn = page.locator(
+        "a[href*='apply'], a:has-text('Apply for this job'), a:has-text('Apply on company website'), button:has-text('Apply')"
+    )
+    if apply_btn.count() == 0:
+        logger.warning("Himalayas: no apply button found on page %s", page.url)
+        return False, "No apply button found on Himalayas page"
+
+    try:
+        with page.expect_popup(timeout=8000) as popup_info:
+            apply_btn.first.click()
+        target_page = popup_info.value
+        should_close = True
+    except PlaywrightTimeoutError:
+        target_page = page
+        should_close = False
+
+    target_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(target_page.url)
+    except UnsupportedATSError:
+        msg = f"Himalayas redirect did not land on a supported ATS: {target_page.url}"
+        logger.warning(msg)
+        if should_close:
+            target_page.close()
+        return False, msg
+
+    logger.info("Himalayas redirected to ATS: %s", ats_name)
+    flow_fn = _ATS_FLOW_MAP.get(ats_name)
+    if not flow_fn or ats_name in ("remotive", "remoteok", "arbeitnow", "jobicy", "himalayas"):
+        if should_close:
+            target_page.close()
+        return False, f"No nested flow for ATS '{ats_name}'"
+
+    try:
+        result = flow_fn(target_page, jd, pdf_path, dry_run, cover_letter)
+        if isinstance(result, tuple):
+            return result
+        return (result, "") if result else (False, f"{ats_name} flow returned False")
+    finally:
+        if should_close:
+            target_page.close()
+
+
 _ATS_FLOW_MAP = {
     "greenhouse": _apply_greenhouse,
     "lever":      _apply_lever,
@@ -672,6 +974,7 @@ _ATS_FLOW_MAP = {
     "remoteok":   _apply_remoteok,
     "arbeitnow":  _apply_arbeitnow,
     "jobicy":     _apply_jobicy,
+    "himalayas":  _apply_himalayas,
 }
 
 

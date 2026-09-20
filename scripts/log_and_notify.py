@@ -53,6 +53,7 @@ _PROCESSED_URLS_CACHE: set[str] | None = None
 _DIGEST_BUFFER = {
     "applied_tailored": [],
     "applied_base": [],
+    "requires_captcha": [],
     "failed": [],
     "skipped": [],
 }
@@ -180,6 +181,21 @@ def notify_telegram(message: str) -> None:
         logger.warning("Failed to send Telegram notification: %s", e)
 
 
+def notify_captcha(jd: dict, apply_url: str) -> None:
+    """Send an immediate high-priority Telegram alert when an application encounters a captcha challenge."""
+    company = jd.get("company", "Unknown Company")
+    title = jd.get("title", "Unknown Title")
+    score = jd.get("score", 0)
+    msg = (
+        f"⚠️ <b>Captcha Challenge Encountered</b>\n\n"
+        f"<b>Role:</b> {title}\n"
+        f"<b>Company:</b> {company}\n"
+        f"<b>Score:</b> {score}\n\n"
+        f"👉 <a href='{apply_url}'>Click here to complete application manually</a>"
+    )
+    notify_telegram(msg)
+
+
 def send_daily_digest() -> None:
     """
     Format and send the buffered daily digest to Telegram.
@@ -192,8 +208,16 @@ def send_daily_digest() -> None:
     msg = f"<b>Job Application Pipeline Complete</b> 🏁\n\n"
     msg += f"🟢 Applied (tailored): {len(_DIGEST_BUFFER['applied_tailored'])}\n"
     msg += f"🟡 Applied (base): {len(_DIGEST_BUFFER['applied_base'])}\n"
+    if _DIGEST_BUFFER["requires_captcha"]:
+        msg += f"⚠️ Requires Captcha: {len(_DIGEST_BUFFER['requires_captcha'])}\n"
     msg += f"🔴 Failed: {len(_DIGEST_BUFFER['failed'])}\n"
     msg += f"⏭️ Skipped: {len(_DIGEST_BUFFER['skipped'])}\n\n"
+
+    if _DIGEST_BUFFER["requires_captcha"]:
+        msg += "<b>Jobs Requiring Captcha:</b>\n"
+        for c in _DIGEST_BUFFER["requires_captcha"][:5]:
+            msg += f"• {c['company']} - {c['title']} (<a href='{c['apply_url']}'>Apply Manually</a>)\n"
+        msg += "\n"
     
     if _DIGEST_BUFFER['failed']:
         msg += "<b>Failed Apps:</b>\n"
@@ -250,6 +274,12 @@ def log_result(
         _DIGEST_BUFFER["applied_tailored"].append(row)
     elif status == "apply_success_base":
         _DIGEST_BUFFER["applied_base"].append(row)
+    elif status == "requires_captcha":
+        _DIGEST_BUFFER["requires_captcha"].append(row)
+        try:
+            notify_captcha(jd, jd.get("apply_url", ""))
+        except Exception as e:
+            logger.warning("Failed to send immediate captcha notification: %s", e)
     elif status == "skipped_low_score":
         _DIGEST_BUFFER["skipped"].append(row)
     elif status in ("apply_failed", "apply_error"):

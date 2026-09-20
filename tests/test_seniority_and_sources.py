@@ -123,6 +123,9 @@ def test_fetch_all_remote_first_ordering(monkeypatch):
     monkeypatch.setattr("scripts.fetch_jds.fetch_jobicy", lambda: [])
     monkeypatch.setattr("scripts.fetch_jds.fetch_arbeitnow", lambda: [])
     monkeypatch.setattr("scripts.fetch_jds.fetch_hackernews", lambda: [])
+    monkeypatch.setattr("scripts.fetch_jds.fetch_himalayas", lambda: [])
+    monkeypatch.setattr("scripts.fetch_jds.fetch_simplify_jobs", lambda: [])
+    monkeypatch.setattr("scripts.fetch_jds.fetch_yc_jobs", lambda: [])
 
     # Mock get_processed_urls to avoid network call to Google Sheets
     monkeypatch.setattr("scripts.log_and_notify.get_processed_urls", lambda: set())

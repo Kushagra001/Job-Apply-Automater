@@ -13,6 +13,7 @@ google-auth==2.30.0          # OAuth2 credentials for gspread
 # render_pdf.py uses Playwright/Chromium (already installed below) for HTML→PDF.
 # WeasyPrint was removed: it requires GTK/Pango system libs unavailable on Windows.
 jinja2==3.1.4                # Resume HTML template rendering
+pypdf>=5.0.0                 # PDF page count & ATS text parseability verification
 
 # ── HTTP / scraping helpers ───────────────────────────────────────────────────
 requests==2.32.3             # JSON API fetches (RemoteOK, Remotive)
