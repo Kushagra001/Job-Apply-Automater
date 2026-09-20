@@ -23,7 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.log_and_notify import _get_sheet, SHEET_COLUMNS
+from scripts.log_and_notify import _get_sheet
 from scripts.auto_apply_ats import validate_ats_job_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

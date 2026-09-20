@@ -27,8 +27,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
-from groq import Groq, GroqError, RateLimitError
+from groq import Groq, GroqError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from dotenv import load_dotenv

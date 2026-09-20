@@ -25,8 +25,8 @@ import logging
 import os
 import time  # Fix #11: top-level import, not inside function
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
-from groq import Groq, GroqError, RateLimitError
+from typing import Any
+from groq import Groq, GroqError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from dotenv import load_dotenv
