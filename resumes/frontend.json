@@ -41,5 +41,45 @@
         "Implemented secure JWT authentication flows and reusable component patterns, reducing code duplication by ~25% and boosting security audit score by 10%"
       ]
     }
+  ],
+  "skills": [
+    "Next.js", "React.js", "TypeScript", "JavaScript (ES6+)", "Zustand", "HTML5", "Tailwind CSS", "Material UI",
+    "Node.js", "Express.js", "MongoDB", "REST APIs", "JWT Authentication",
+    "OOP", "REST API Design", "Agentic Coding Workflows", "CI/CD Pipelines",
+    "Git", "Docker", "Vite", "Figma", "Claude Code", "GitHub Copilot", "n8n"
+  ],
+  "projects": [
+    {
+      "name": "Flow",
+      "stack": "Next.js 16, Tailwind CSS, Framer Motion",
+      "bullets": [
+        "Built a complete SaaS landing page - hero, interactive feature showcase, pricing tiers, and social proof - using Next.js 16 App Router and Framer Motion for scroll and transition animations, boosting user engagement by 30%.",
+        "Implemented accessibility, SEO, and performance foundations: ARIA labels, keyboard navigation, semantic HTML, Open Graph/structured data, and Next.js Image/font optimization, improving Lighthouse score to 98."
+      ]
+    },
+    {
+      "name": "SkillHire",
+      "stack": "React, TypeScript, REST APIs, Role-Based Access Control",
+      "bullets": [
+        "Built a modular, role-based hiring platform frontend with Admin and User workflows using scalable, reusable components and permission-aware routing, supporting 2k monthly applicants."
+      ]
+    },
+    {
+      "name": "Linkify",
+      "stack": "React, Zustand, Tailwind CSS, Node.js, Socket.io, OpenAI, MongoDB",
+      "bullets": [
+        "Built a high-performance chat UI with Tailwind CSS and Zustand, cutting state-related overhead by ~30% for smoother client-side interactions.",
+        "Implemented real-time bi-directional messaging with Socket.io, achieving sub-200ms latency and reliable delivery during peak traffic.",
+        "Built responsive layout components that improved cross-device compatibility and reduced layout shift by over 35%."
+      ]
+    }
+  ],
+  "education": [
+    "MCA, Vellore Institute of Technology, Bhopal - CGPA: 9.03 (07/2023 - 07/2025)",
+    "BCA, JECRC University, Jaipur - CGPA: 8.20 (07/2019 - 07/2022)"
+  ],
+  "certifications": [
+    "Oracle Certified Generative AI Professional (OCI 2025)",
+    "Oracle Certified AI Foundations Associate (OCI 2025)"
   ]
 }

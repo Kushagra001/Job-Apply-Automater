@@ -94,24 +94,35 @@ def score_jd_against_all_variants(jd: dict, variants: dict[str, dict]) -> dict[s
         }
 
     prompt = f"""
-    You are an expert technical recruiter matching a job description against a candidate's 4 resume variants.
+    You are an expert technical recruiter matching a job description against a candidate's resume variants.
+    Candidate Background:
+    - Master of Computer Applications (MCA, CGPA 9.03/10) & BCA (CGPA 8.20/10).
+    - Early career engineer with 0–2 years of total experience.
+    - Strong technical foundation across full-stack, frontend, backend (Python/Node), AI/ML engineering, QA/SDET automation, and Solutions/Technical Support engineering.
     {description_note}
 
-    Job:
+    Job Listing:
     Title: {jd.get('title', '')}
     Company: {jd.get('company', '')}
     Location: {jd.get('location', '')}
+    Remote: {jd.get('remote', False)}
     Description: {jd_description[:3000] if jd_description else '(not provided — use title/company to infer requirements)'}
 
     Candidate Resume Variants:
     {json.dumps(variants_summary, indent=2)}
 
-    Evaluate the JD against all variants and select the single BEST MATCHING variant.
-    Return JSON with exactly these fields:
-    - "best_variant": string, must be one of {list(variants.keys())}.
-    - "score": integer 0-100 (match quality of the chosen best variant). Use 70+ if the role clearly aligns with the candidate's stack.
-    - "missing_skills": list of strings for critical skills in the JD that are absent from this best variant.
-    - "reasoning": 1-2 sentence explanation of why this variant is the best match.
+    Scoring Guidelines:
+    1. Experience Level Gate:
+       - If the JD strictly requires 3+ years of experience or is a mid/senior/staff/lead role, assign a score BELOW 40 (status skipped).
+       - If the JD is early career, junior, associate, fresher, graduate, or 0–2 years experience, evaluate favorably. If core tech skills align, score 70+.
+    2. Variant Selection:
+       - Pick the variant that provides the highest alignment with the JD's requirements.
+       - Available variants include software development, QA/SDET, and Solutions/Support roles.
+    3. Return JSON with exactly these fields:
+       - "best_variant": string, must be one of {list(variants.keys())}.
+       - "score": integer 0-100 (match quality of the chosen best variant).
+       - "missing_skills": list of strings for critical skills in the JD that are absent from this best variant.
+       - "reasoning": 1-2 sentence explanation of why this variant is the best match.
     """
 
     client = Groq()
@@ -140,9 +151,14 @@ def score_jd_against_all_variants(jd: dict, variants: dict[str, dict]) -> dict[s
                 # Default to first variant if model returned an unlisted name
                 best_v = list(variants.keys())[0]
 
+            score = int(result.get("score", 0))
+            # Remote preference bonus: +5 points for remote jobs if base score is already competitive (>= 50)
+            if jd.get("remote") and score >= 50:
+                score = min(100, score + 5)
+
             return {
                 "best_variant": best_v,
-                "score": int(result.get("score", 0)),
+                "score": score,
                 "missing_skills": result.get("missing_skills", []),
                 "reasoning": result.get("reasoning", "")
             }

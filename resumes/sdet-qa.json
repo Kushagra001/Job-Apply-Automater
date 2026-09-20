@@ -1,0 +1,96 @@
+{
+  "variant": "sdet-qa",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
+  "summary": "QA Automation Engineer and SDET with strong experience developing automated test suites, end-to-end browser automation with Playwright, and backend API validation using Python, pytest, and Postman. Skilled in designing reliable CI/CD testing pipelines, performance benchmarking, and automating complex workflows with agentic tools.",
+  "experience": [
+    {
+      "company": "Stackform",
+      "role": "QA Automation Engineer (Freelance)",
+      "dates": "01/2026 - Present",
+      "bullets": [
+        "Architected automated end-to-end browser testing pipelines using Playwright and Python, reducing manual regression testing time by 70% across 5 client production deployments.",
+        "Implemented automated form-filling, bot detection evasion, and error boundary verification suites with 98% pass rate across parallel headless browser environments.",
+        "Integrated automated test execution into GitHub Actions CI/CD workflows, catching 25+ critical bugs pre-release and cutting release cycle time by 30%.",
+        "Created reusable regression test scripts and mock data fixtures for REST APIs, improving test coverage by 40% and cutting staging downtime."
+      ]
+    },
+    {
+      "company": "GYMYAK Pvt. Ltd.",
+      "role": "Software & QA Engineer",
+      "dates": "05/2025 - 12/2025",
+      "bullets": [
+        "Built automated API integration tests with Postman and Python pytest for Node.js and MongoDB endpoints, achieving 99% regression test reliability.",
+        "Tested and monitored frontend performance and responsiveness for e-commerce web applications, identifying memory leaks and reducing page load times by 20%.",
+        "Collaborated with developers and product managers in agile sprint reviews to triage bugs, reproduce customer issues, and reduce defect turnaround time by 25%."
+      ]
+    },
+    {
+      "company": "Tenshi IT Solutions",
+      "role": "Software Engineer Intern (Test & Dev)",
+      "dates": "12/2024 - 04/2025",
+      "bullets": [
+        "Authored unit and component tests for authentication flows (JWT) and state management in React, preventing regressions across 15+ sprint releases.",
+        "Conducted cross-browser validation and UI test automation across Chrome, Firefox, and Safari, improving UI consistency by 35%."
+      ]
+    }
+  ],
+  "skills": [
+    "Python",
+    "Playwright",
+    "pytest",
+    "Postman",
+    "API Testing",
+    "Test Automation",
+    "End-to-End Testing",
+    "Regression Testing",
+    "CI/CD Pipelines",
+    "GitHub Actions",
+    "Docker",
+    "Linux",
+    "Bash",
+    "JavaScript",
+    "TypeScript",
+    "Node.js",
+    "React.js",
+    "REST APIs",
+    "MongoDB",
+    "PostgreSQL",
+    "Git",
+    "Claude Code",
+    "GitHub Copilot"
+  ],
+  "projects": [
+    {
+      "name": "Automated ATS Test & Verification Suite",
+      "stack": "Python, Playwright, pytest, GitHub Actions",
+      "bullets": [
+        "Built an autonomous end-to-end browser testing suite with Playwright and Python, automating multi-step form verification, file uploads, and DOM validation across complex SPAs.",
+        "Engineered intelligent retry logic, stealth evasion, and dynamic locator fallbacks that reduced automated test failure rates by 85% on dynamic web applications."
+      ]
+    },
+    {
+      "name": "Linkify Automated API Test Harness",
+      "stack": "Python, Node.js, Socket.io, pytest, Postman",
+      "bullets": [
+        "Built automated load and latency test suites for bi-directional WebSocket channels, verifying sub-200ms latency limits under simulated concurrent user traffic.",
+        "Created end-to-end test scenarios validating JWT authentication, token expiration, and database state consistency with 100% test scenario pass rate."
+      ]
+    }
+  ],
+  "education": [
+    "MCA, Vellore Institute of Technology, Bhopal - CGPA: 9.03 (07/2023 - 07/2025)",
+    "BCA, JECRC University, Jaipur - CGPA: 8.20 (07/2019 - 07/2022)"
+  ],
+  "certifications": [
+    "Oracle Certified Generative AI Professional (OCI 2025)",
+    "Oracle Certified AI Foundations Associate (OCI 2025)"
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "variant": "solutions-support",
+  "contact": {
+    "full_name": "Kushagra Singh Negi",
+    "location": "Jaipur, India",
+    "phone": "+91 9521693663",
+    "email": "kushagrasinghnegi9@gmail.com",
+    "linkedin": "https://www.linkedin.com/in/kushh01",
+    "github": "https://github.com/Kushagra001",
+    "portfolio": "https://www.stack-form.dev/"
+  },
+  "summary": "Solutions & Developer Support Engineer with hands-on expertise troubleshooting REST APIs, webhook architectures, full-stack web applications, and database integrations. Skilled in translating complex client requirements into working integrations, diagnosing production technical incidents, and delivering high-quality technical documentation.",
+  "experience": [
+    {
+      "company": "Stackform",
+      "role": "Solutions & Integration Engineer (Freelance)",
+      "dates": "01/2026 - Present",
+      "bullets": [
+        "Acted as primary technical advisor across 12+ client engagements, scoping custom API integrations, webhook pipelines, and deployment architectures on Vercel and Supabase.",
+        "Diagnosed and resolved critical client-facing production issues, debugging HTTP payloads, CORS configurations, and database query bottlenecks with an average resolution time under 4 hours.",
+        "Authored comprehensive technical documentation, onboarding guides, and API integration examples, decreasing client onboarding friction by 40%."
+      ]
+    },
+    {
+      "company": "GYMYAK Pvt. Ltd.",
+      "role": "Technical Support & Web Developer",
+      "dates": "05/2025 - 12/2025",
+      "bullets": [
+        "Investigated and resolved customer-reported technical incidents across e-commerce checkout, payment gateways, and user accounts, maintaining a 95% first-contact resolution rate.",
+        "Collaborated with backend engineers to trace API error responses and database integrity issues in MongoDB and Node.js, reducing recurring system bugs by 25%.",
+        "Documented operational runbooks and troubleshooting workflows that cut team incident triage time by 30%."
+      ]
+    },
+    {
+      "company": "Tenshi IT Solutions",
+      "role": "Technical Support & Frontend Intern",
+      "dates": "12/2024 - 04/2025",
+      "bullets": [
+        "Monitored application health, reviewed error logs, and provided rapid technical triage for user authentication and UI display anomalies.",
+        "Reproduced reported frontend issues and built modular bug fixes in React, improving client user experience ratings by 20%."
+      ]
+    }
+  ],
+  "skills": [
+    "REST APIs",
+    "API Troubleshooting",
+    "Webhooks",
+    "Postman",
+    "HTTP / Networking",
+    "SQL",
+    "PostgreSQL",
+    "MongoDB",
+    "Python",
+    "Node.js",
+    "JavaScript",
+    "TypeScript",
+    "React.js",
+    "Next.js",
+    "Docker",
+    "Linux",
+    "Git",
+    "Technical Documentation",
+    "Client Communication",
+    "Incident Triage",
+    "Supabase",
+    "n8n Automation"
+  ],
+  "projects": [
+    {
+      "name": "BidCopy API & Extension Integration",
+      "stack": "Next.js, Supabase, Clerk, Razorpay, REST APIs",
+      "bullets": [
+        "Engineered end-to-end integration architecture connecting a Next.js SaaS platform to Chrome Extensions, third-party LLM providers, and Razorpay billing with 99.9% uptime.",
+        "Implemented webhook listeners with cryptographic signature validation, ensuring reliable subscription event handling and real-time state synchronization."
+      ]
+    },
+    {
+      "name": "Autonomous Incident & Pipeline Monitor",
+      "stack": "Python, Telegram API, Google Sheets API, Docker",
+      "bullets": [
+        "Built a resilient monitoring and alert dispatcher that captures system runtime exceptions, classifies failure modes, and posts automated incident digests via Telegram.",
+        "Created self-healing retry logic with exponential backoff for third-party HTTP dependencies, reducing unhandled transient network failures to near zero."
+      ]
+    }
+  ],
+  "education": [
+    "MCA, Vellore Institute of Technology, Bhopal - CGPA: 9.03 (07/2023 - 07/2025)",
+    "BCA, JECRC University, Jaipur - CGPA: 8.20 (07/2019 - 07/2022)"
+  ],
+  "certifications": [
+    "Oracle Certified Generative AI Professional (OCI 2025)",
+    "Oracle Certified AI Foundations Associate (OCI 2025)"
+  ]
+}

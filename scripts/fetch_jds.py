@@ -54,8 +54,11 @@ logger = logging.getLogger(__name__)
 
 REMOTEOK_URL = "https://remoteok.com/api"
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
+JOBICY_URL = "https://jobicy.com/api/v2/remote-jobs"
+ARBEITNOW_URL = "https://www.arbeitnow.com/api/job-board-api"
 REMOTEOK_LIMIT = 150
 REMOTIVE_LIMIT = 150
+JOBICY_LIMIT = 50
 
 HEADERS = {
     "User-Agent": (
@@ -124,29 +127,57 @@ TECH_TITLE_KEYWORDS: frozenset[str] = frozenset([
     "ios", "android", "mobile", "flutter", "react native", "swift",
     # Blockchain / Web3
     "blockchain", "web3", "smart contract", "solidity", "defi",
-    # QA / Testing
-    "qa engineer", "test engineer", "quality assurance", "automation engineer", "sdet",
+    # QA / Testing / SDET
+    "qa", "qa engineer", "test engineer", "quality assurance", "automation engineer",
+    "sdet", "software tester", "test analyst", "test automation", "qa tester", "tester",
     # Database / Systems
     "database", "dba", "postgres", "mysql", "embedded", "firmware", "systems engineer",
-    # Product / Technical adjacent
-    "product manager", "product designer", "solutions engineer", "developer advocate",
-    "technical support", "technical writer", "integrations",
+    # Solutions / Support / Integrations / Tech Adjacent
+    "solutions engineer", "solution engineer", "developer advocate", "developer support",
+    "technical support", "tech support", "technical writer", "integrations", "integration engineer",
+    "support engineer", "application support", "client support engineer", "technical operations",
+    "product manager", "product designer",
 ])
+
+# Word-boundary patterns for seniority levels (e.g. SDE 2, SWE II, Level 3 vs SDE 1, SWE I)
+SENIOR_LEVEL_PATTERN = re.compile(
+    r"\b(?:sde|swe|engineer|developer|qa)\s*[-_ ]*(?:ii|iii|iv|v|2|3|4|5)\b|\b(?:level|ic|l)\s*[-_ ]*[2-6]\b|\b(?:level|ic)\s*[-_ ]*(?:ii|iii|iv|v)\b",
+    re.IGNORECASE
+)
+
+JUNIOR_LEVEL_PATTERN = re.compile(
+    r"\b(?:sde|swe|engineer|developer|qa)\s*[-_ ]*(?:i|1)\b|\b(?:level|ic|l)\s*[-_ ]*1\b|\b(?:level|ic)\s*[-_ ]*i\b",
+    re.IGNORECASE
+)
 
 # Senior-only keywords: excluded to prioritize freshers (0-2 yrs)
 SENIOR_ONLY_TITLE_KEYWORDS: frozenset[str] = frozenset([
+    # Executive & leadership
     "staff", "principal", "distinguished", "fellow",
     "vp ", "vice president", "director", "head of", "chief",
-    "c-level", "cto", "cso", "ciso",
+    "c-level", "cto", "cso", "ciso", "cio",
     "senior manager", "engineering manager", "em,", " em ", "(em)",
-    "lead ", "architect",
+    "lead ", "team lead", "tech lead", "lead engineer", "lead developer",
+    "architect",
+    # Senior / Mid-Senior explicit keywords
+    "senior", "sr.", "sr ", "sr/", "sr-",
+    "mid-senior", "mid senior", "mid-level", "mid level",
 ])
 
-# Explicit entry/fresher signals: always kept
+# Explicit entry/fresher signals: always kept even if overlapping with senior substring
 JUNIOR_TITLE_KEYWORDS: frozenset[str] = frozenset([
-    "junior", "jr.", " jr ", "entry", "associate engineer", "intern", "graduate",
-    "new grad", "early career", "0-2", "0 to 2", "fresher",
+    "junior", "jr.", " jr ", "jr-", "entry", "entry-level", "entry level",
+    "associate", "associate engineer", "associate developer", "associate software",
+    "intern", "internship", "graduate", "grad", "new grad", "early career",
+    "0-2", "0 to 2", "fresher", "fresh graduate", "campus", "trainee",
 ])
+
+# High-level management / architect titles that should never be overridden by junior tokens
+SUPER_SENIOR: tuple[str, ...] = (
+    "director", "vp ", "vice president", "head of", "chief", "cto", "cio", "cso",
+    "architect", "staff", "principal", "distinguished", "fellow",
+    "engineering manager", "senior manager",
+)
 
 # India target locations
 INDIA_KEYWORDS: frozenset[str] = frozenset([
@@ -154,6 +185,38 @@ INDIA_KEYWORDS: frozenset[str] = frozenset([
     "pune", "hyderabad", "chennai", "delhi", "gurugram", "noida",
     "kolkata", "ahmedabad", "jaipur", "rajasthan", "remote india", "india remote",
 ])
+
+# Explicit foreign geo-fence phrases
+EXCLUDED_GEO_KEYWORDS: tuple[str, ...] = (
+    "us only", "u.s. only", "usa only", "united states only", "us-only",
+    "remote - us", "remote (us)", "remote, us", "remote: us", "us remote",
+    "remote - usa", "remote (usa)", "remote, usa", "remote: usa", "usa remote",
+    "remote - united states", "remote (united states)", "remote, united states",
+    "remote - canada", "remote (canada)", "remote, canada",
+    "remote - uk", "remote (uk)", "remote, uk",
+    "remote - europe", "remote (europe)", "remote, europe",
+    "north america", "amer", "americas", "emea", "latam", "apac only",
+    "uk only", "canada only", "europe only", "germany only",
+    "must reside in", "must be located in", "us citizenship",
+    "authorized to work in the us", "authorized to work in the united states",
+)
+
+# Standalone foreign country / region names for geo-fenced remote listings
+EXCLUDED_COUNTRY_RESTRICTED: frozenset[str] = frozenset([
+    "us", "u.s.", "usa", "u.s.a.", "united states", "united states of america",
+    "canada", "uk", "u.k.", "united kingdom", "great britain", "england",
+    "germany", "deutschland", "france", "australia", "netherlands",
+    "brazil", "poland", "spain", "singapore", "mexico", "czechia",
+    "hungary", "ukraine", "malaysia", "argentina", "europe", "emea", "latam",
+    "amer", "americas", "north america", "south america", "apac",
+])
+
+# Regex patterns detecting explicit requirement for >= 3 years experience in JD text
+SENIOR_EXP_PATTERNS = [
+    re.compile(r"(?:minimum|at least|requires?|have|with)\s*([3-9]|\d{2})\s*\+?\s*(?:years?|yrs?)\s*(?:of)?\s*(?:experience|exp)", re.IGNORECASE),
+    re.compile(r"([3-9]|\d{2})\s*\+?\s*(?:years?|yrs?)\s*(?:of)?\s*(?:experience|exp)\s*(?:required|minimum)", re.IGNORECASE),
+    re.compile(r"experience\s*(?:required|level)?\s*:\s*([3-9]|\d{2})\s*\+?\s*(?:years?|yrs?)", re.IGNORECASE),
+]
 
 
 def _is_tech_job(title: str) -> bool:
@@ -163,41 +226,75 @@ def _is_tech_job(title: str) -> bool:
 
 
 def _is_senior_only(title: str) -> bool:
-    """Return True if title indicates an explicitly senior/staff/director role."""
+    """Return True if title indicates an explicitly senior/staff/lead role, unless junior signals are present."""
     t = title.lower()
-    # If title has director, vp, staff, principal, lead, architect, etc -> senior
+    # Executive and architecture roles are always senior, even if 'associate' appears
+    if any(kw in t for kw in SUPER_SENIOR):
+        return True
+    # Level numerals: SDE 2, SWE II, Level 3, etc. are senior
+    if SENIOR_LEVEL_PATTERN.search(t):
+        return True
+    # Explicit entry/fresher signals protect roles like 'Associate Software Engineer' or 'SDE 1'
+    if JUNIOR_LEVEL_PATTERN.search(t) or any(kw in t for kw in JUNIOR_TITLE_KEYWORDS):
+        return False
+    # Standard senior signals (e.g. 'Senior Engineer')
     if any(kw in t for kw in SENIOR_ONLY_TITLE_KEYWORDS):
         return True
     return False
 
 
-EXCLUDED_GEO_KEYWORDS: tuple[str, ...] = (
-    "us only", "u.s. only", "usa only", "united states only", "us-only",
-    "north america", "amer", "americas", "emea", "latam", "apac only",
-    "uk only", "canada only", "europe only", "germany only",
-    "must reside in", "must be located in", "us citizenship",
-    "authorized to work in the us", "authorized to work in the united states",
-)
+def _requires_senior_experience(description: str) -> bool:
+    """Return True if the description explicitly demands >= 3 years of experience."""
+    if not description:
+        return False
+    for pat in SENIOR_EXP_PATTERNS:
+        m = pat.search(description)
+        if m:
+            try:
+                yrs = int(m.group(1))
+                if yrs >= 3:
+                    return True
+            except (ValueError, IndexError):
+                continue
+    return False
 
 
 def is_location_ok(location: str, remote: bool) -> bool:
     """
     Return True if the job is accessible to an India-based applicant:
-    - Located in India, OR
+    - Located in India (office, hybrid, or remote), OR
     - Remote WITHOUT restrictive foreign geo-fencing (e.g. US/EU/AMER/EMEA only).
     """
-    loc = (location or "").lower()
-    # Explicit India location always OK
+    loc = (location or "").lower().strip()
+
+    # Explicit India location is always OK
     if any(kw in loc for kw in INDIA_KEYWORDS):
         return True
 
-    # Remote roles must not be geo-restricted to foreign regions
-    if remote:
-        if any(kw in loc for kw in EXCLUDED_GEO_KEYWORDS):
-            return False
+    # If not remote and not in India, cannot work onsite
+    if not remote:
+        return False
+
+    # For remote roles: check for negative geo-restrictions
+    if any(kw in loc for kw in EXCLUDED_GEO_KEYWORDS):
+        return False
+
+    if loc in EXCLUDED_COUNTRY_RESTRICTED:
+        return False
+
+    # If remote with explicit global signals or empty location
+    if loc in ("", "remote", "worldwide", "anywhere", "global", "work from anywhere", "wfa"):
         return True
 
-    return False
+    if any(kw in loc for kw in ("worldwide", "anywhere", "global", "wfa", "all countries")):
+        return True
+
+    # Check if location tokens specify a foreign country
+    foreign_tokens = set(re.findall(r"\b[a-zA-Z]+\b", loc))
+    if foreign_tokens & EXCLUDED_COUNTRY_RESTRICTED:
+        return False
+
+    return True
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -292,6 +389,8 @@ def _fetch_single_greenhouse(slug: str) -> list[dict]:
             if not apply_url:
                 continue
             description = _strip_html(job.get("content", ""))
+            if _requires_senior_experience(description):
+                continue
             results.append(_jd(
                 title=title,
                 company=company_name,
@@ -350,6 +449,8 @@ def _fetch_single_ashby(slug: str) -> list[dict]:
             description = _strip_html(
                 job.get("descriptionHtml", "") or job.get("descriptionPlain", "")
             )
+            if _requires_senior_experience(description):
+                continue
             results.append(_jd(
                 title=title,
                 company=company_name,
@@ -406,6 +507,8 @@ def _fetch_single_lever(slug: str) -> list[dict]:
             description = _strip_html(
                 job.get("descriptionBody", "") or job.get("description", "")
             )
+            if _requires_senior_experience(description):
+                continue
             results.append(_jd(
                 title=title,
                 company=company_name,
@@ -456,6 +559,9 @@ def fetch_remoteok() -> list[dict]:
         company = item.get("company", "").strip()
         if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
             continue
+        description = item.get("description", "")
+        if _requires_senior_experience(description):
+            continue
         location = item.get("location", "") or ""
         apply_url = item.get("apply_url") or item.get("url", "")
         if not apply_url:
@@ -465,7 +571,7 @@ def fetch_remoteok() -> list[dict]:
             company=company,
             location=location,
             remote=True,
-            description=item.get("description", ""),
+            description=description,
             apply_url=apply_url,
             source="remoteok",
         ))
@@ -495,6 +601,9 @@ def fetch_remotive() -> list[dict]:
         company = item.get("company_name", "").strip()
         if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
             continue
+        description = item.get("description", "")
+        if _requires_senior_experience(description):
+            continue
         location = item.get("candidate_required_location", "") or ""
         remote = _is_remote(location) or not location.strip()
         loc_lower = location.lower()
@@ -509,11 +618,113 @@ def fetch_remotive() -> list[dict]:
             company=company,
             location=location,
             remote=remote,
-            description=item.get("description", ""),
+            description=description,
             apply_url=apply_url,
             source="remotive",
         ))
     logger.info("fetch_remotive — %d listings", len(listings))
+    return listings
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
+def fetch_jobicy() -> list[dict]:
+    """Fetch 100% remote job listings from Jobicy API."""
+    listings: list[dict] = []
+    try:
+        resp = requests.get(
+            JOBICY_URL,
+            params={"count": JOBICY_LIMIT, "industry": "engineering"},
+            headers=HEADERS,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            logger.warning("fetch_jobicy — HTTP %s", resp.status_code)
+            return []
+        data = resp.json()
+        jobs = data.get("jobs", [])
+        for item in jobs:
+            title = (item.get("jobTitle") or "").strip()
+            company = (item.get("companyName") or "").strip()
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+                continue
+            location = item.get("jobGeo", "") or ""
+            # Jobicy is 100% remote
+            remote = True
+            loc_lower = location.lower()
+            is_worldwide = "anywhere" in loc_lower or "worldwide" in loc_lower or "global" in loc_lower
+            if not is_worldwide and not is_location_ok(location, remote):
+                continue
+            description = _strip_html(item.get("jobDescription", ""))
+            if _requires_senior_experience(description):
+                continue
+            apply_url = (item.get("url") or "").strip()
+            if not apply_url:
+                continue
+            listings.append(_jd(
+                title=title,
+                company=company,
+                location=location,
+                remote=remote,
+                description=description,
+                apply_url=apply_url,
+                source="jobicy",
+            ))
+    except Exception as e:
+        logger.error("fetch_jobicy — error: %s", e)
+
+    logger.info("fetch_jobicy — %d listings", len(listings))
+    return listings
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.RequestException)
+)
+def fetch_arbeitnow() -> list[dict]:
+    """Fetch tech job listings from Arbeitnow API."""
+    listings: list[dict] = []
+    try:
+        resp = requests.get(ARBEITNOW_URL, headers=HEADERS, timeout=20)
+        if resp.status_code != 200:
+            logger.warning("fetch_arbeitnow — HTTP %s", resp.status_code)
+            return []
+        data = resp.json()
+        jobs = data.get("data", [])
+        for item in jobs:
+            title = (item.get("title") or "").strip()
+            company = (item.get("company_name") or "").strip()
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+                continue
+            location = (item.get("location") or "").strip()
+            remote = bool(item.get("remote", False)) or _is_remote(location)
+            loc_lower = location.lower()
+            is_worldwide = "anywhere" in loc_lower or "worldwide" in loc_lower or "global" in loc_lower
+            if not is_worldwide and not is_location_ok(location, remote):
+                continue
+            description = _strip_html(item.get("description", ""))
+            if _requires_senior_experience(description):
+                continue
+            apply_url = (item.get("url") or "").strip()
+            if not apply_url:
+                continue
+            listings.append(_jd(
+                title=title,
+                company=company,
+                location=location,
+                remote=remote,
+                description=description,
+                apply_url=apply_url,
+                source="arbeitnow",
+            ))
+    except Exception as e:
+        logger.error("fetch_arbeitnow — error: %s", e)
+
+    logger.info("fetch_arbeitnow — %d listings", len(listings))
     return listings
 
 
@@ -540,7 +751,6 @@ def fetch_hackernews() -> list[dict]:
         url_regex = re.compile(r"https?://\S+")
 
         import html
-        from scripts.auto_apply_ats import _ATS_DOMAIN_MAP
 
         for comment in all_comments:
             raw_text = comment.get("comment_text", "")
@@ -548,6 +758,8 @@ def fetch_hackernews() -> list[dict]:
             if not ats_pattern.search(text):
                 continue
             stripped = _strip_html(text)
+            if _requires_senior_experience(stripped):
+                continue
             first_line = stripped.split("\n")[0].strip()
             parts = [p.strip() for p in first_line.split("|")]
             company = parts[0] if parts else "HN Startup"
@@ -598,14 +810,16 @@ def fetch_hackernews() -> list[dict]:
 def fetch_all() -> list[dict]:
     """
     Fetch job listings from all sources, filter against processed URLs, and
-    return a source-balanced, interleaved list.
+    return a source-balanced, remote-first interleaved list.
 
     Round-Robin Interleaving ensures Greenhouse DOES NOT starve Ashby, Lever,
-    RemoteOK, Remotive, or HackerNews!
+    Jobicy, Arbeitnow, RemoteOK, Remotive, or HackerNews!
     """
     sources = [
         ("ashby",      fetch_ashby),
         ("lever",      fetch_lever),
+        ("jobicy",     fetch_jobicy),
+        ("arbeitnow",  fetch_arbeitnow),
         ("greenhouse", fetch_greenhouse),
         ("remoteok",   fetch_remoteok),
         ("remotive",   fetch_remotive),
@@ -659,9 +873,8 @@ def fetch_all() -> list[dict]:
     for src_list in grouped.values():
         src_list.sort(key=lambda j: 0 if j.get("remote") else 1)
 
-    # Round-Robin Interleave across sources:
-    # [Ashby_0, Lever_0, RemoteOK_0, Remotive_0, Greenhouse_0, HN_0, Ashby_1, ...]
-    source_order = ["ashby", "lever", "remoteok", "remotive", "greenhouse", "hackernews"]
+    # Round-Robin Interleave across sources
+    source_order = ["ashby", "lever", "jobicy", "arbeitnow", "remoteok", "remotive", "greenhouse", "hackernews"]
     interleaved: list[dict] = []
     max_count = max((len(lst) for lst in grouped.values()), default=0)
 
@@ -670,10 +883,17 @@ def fetch_all() -> list[dict]:
             if i < len(grouped[src]):
                 interleaved.append(grouped[src][i])
 
+    # Remote-First Prioritization: place all remote listings at the front of the queue
+    remote_jobs = [j for j in interleaved if j.get("remote")]
+    onsite_jobs = [j for j in interleaved if not j.get("remote")]
+    interleaved = remote_jobs + onsite_jobs
+
     logger.info(
-        "fetch_all — %d total fetched → %d deduplicated & balanced across sources: %s",
+        "fetch_all — %d total fetched → %d deduplicated & balanced across sources (%d remote, %d onsite): %s",
         len(combined),
         len(interleaved),
+        len(remote_jobs),
+        len(onsite_jobs),
         {k: len(v) for k, v in grouped.items()},
     )
     return interleaved
@@ -695,6 +915,8 @@ if __name__ == "__main__":
             "hackernews": fetch_hackernews,
             "remoteok":   fetch_remoteok,
             "remotive":   fetch_remotive,
+            "jobicy":     fetch_jobicy,
+            "arbeitnow":  fetch_arbeitnow,
         }
         if source not in fn_map:
             print(f"Unknown source '{source}'. Choose from: {', '.join(fn_map)}")

@@ -74,6 +74,8 @@ _ATS_DOMAIN_MAP = {
     "ashbyhq.com":    "ashby",
     "remotive.com":   "remotive",
     "remoteok.com":   "remoteok",
+    "arbeitnow.com":  "arbeitnow",
+    "jobicy.com":     "jobicy",
 }
 
 
@@ -589,12 +591,87 @@ def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: 
             target_page.close()
 
 
+def _apply_arbeitnow(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Handles Arbeitnow job apply redirect to ATS."""
+    logger.info("Starting Arbeitnow flow...")
+    apply_url = page.url
+    target_url = f"{apply_url.rstrip('/')}/apply" if not apply_url.endswith("/apply") else apply_url
+    logger.info("Navigating to Arbeitnow apply redirect: %s", target_url)
+    page.goto(target_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(page.url)
+    except UnsupportedATSError:
+        msg = f"Arbeitnow redirect did not land on a supported ATS: {page.url}"
+        logger.warning(msg)
+        return False, msg
+
+    logger.info("Arbeitnow redirected to ATS: %s", ats_name)
+    flow_fn = _ATS_FLOW_MAP.get(ats_name)
+    if not flow_fn or ats_name in ("remotive", "remoteok", "arbeitnow", "jobicy"):
+        return False, f"No nested flow for ATS '{ats_name}'"
+
+    result = flow_fn(page, jd, pdf_path, dry_run, cover_letter)
+    if isinstance(result, tuple):
+        return result
+    return (result, "") if result else (False, f"{ats_name} flow returned False")
+
+
+def _apply_jobicy(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Handles Jobicy job apply redirect to ATS."""
+    logger.info("Starting Jobicy flow...")
+    apply_btn = page.locator(
+        "button.jv-apply-primary, a.jv-button:has-text('Apply'), a:has-text('Apply for this job'), a:has-text('Apply now')"
+    )
+    if apply_btn.count() == 0:
+        logger.warning("Jobicy: no apply button found — skipping")
+        return False, "No apply button found on Jobicy page"
+
+    try:
+        with page.expect_popup(timeout=8000) as popup_info:
+            apply_btn.first.click()
+        target_page = popup_info.value
+        should_close = True
+    except PlaywrightTimeoutError:
+        target_page = page
+        should_close = False
+
+    target_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(target_page.url)
+    except UnsupportedATSError:
+        msg = f"Jobicy redirect did not land on a supported ATS: {target_page.url}"
+        logger.warning(msg)
+        if should_close:
+            target_page.close()
+        return False, msg
+
+    logger.info("Jobicy redirected to ATS: %s", ats_name)
+    flow_fn = _ATS_FLOW_MAP.get(ats_name)
+    if not flow_fn or ats_name in ("remotive", "remoteok", "arbeitnow", "jobicy"):
+        if should_close:
+            target_page.close()
+        return False, f"No nested flow for ATS '{ats_name}'"
+
+    try:
+        result = flow_fn(target_page, jd, pdf_path, dry_run, cover_letter)
+        if isinstance(result, tuple):
+            return result
+        return (result, "") if result else (False, f"{ats_name} flow returned False")
+    finally:
+        if should_close:
+            target_page.close()
+
+
 _ATS_FLOW_MAP = {
     "greenhouse": _apply_greenhouse,
     "lever":      _apply_lever,
     "ashby":      _apply_ashby,
     "remotive":   _apply_remotive,
     "remoteok":   _apply_remoteok,
+    "arbeitnow":  _apply_arbeitnow,
+    "jobicy":     _apply_jobicy,
 }
 
 

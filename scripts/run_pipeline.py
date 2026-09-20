@@ -40,12 +40,16 @@ def _keyword_pick_variant(jd: dict) -> str:
     Matches job title keywords to the most suitable base resume variant.
     """
     title = (jd.get("title", "") + " " + jd.get("description", "")[:200]).lower()
+    if any(k in title for k in ["qa", "sdet", "test", "quality assurance", "automation engineer", "tester"]):
+        return "sdet-qa"
+    if any(k in title for k in ["solutions", "solution", "support engineer", "technical support", "integration", "client support", "customer engineer"]):
+        return "solutions-support"
     if any(k in title for k in ["frontend", "front-end", "react", "vue", "angular", "next.js", "ui engineer", "css"]):
         return "frontend"
-    if any(k in title for k in ["python", "django", "fastapi", "flask", "data engineer", "ml ", "machine learning"]):
-        return "backend-python"
     if any(k in title for k in ["ai engineer", "llm", "genai", "mlops", "generative ai"]):
         return "ai-engineer"
+    if any(k in title for k in ["python", "django", "fastapi", "flask", "data engineer", "ml ", "machine learning"]):
+        return "backend-python"
     if any(k in title for k in ["node", "typescript", "express", "nestjs", "nest.js", "backend"]):
         return "backend-node"
     return "backend-node"  # Safe default
@@ -100,8 +104,8 @@ def main():
             "greenhouse.io", "lever.co", "ashbyhq.com",
             "gh_jid=", # For custom greenhouse domains like stripe.com
         )
-        # RemoteOK and Remotive have their own apply flows, always pass them through
-        is_aggregator = source in ("remoteok", "remotive")
+        # Aggregators have their own apply/redirect flows, pass them through
+        is_aggregator = source in ("remoteok", "remotive", "jobicy", "arbeitnow")
         if not is_aggregator and not any(domain in apply_url for domain in _SUPPORTED_DOMAINS):
             logger.warning(f"Unsupported ATS or apply URL for '{title}' at '{company}': {apply_url}")
             log_result(
