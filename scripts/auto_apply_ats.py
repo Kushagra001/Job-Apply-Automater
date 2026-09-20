@@ -33,7 +33,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_sync
+from playwright_stealth import Stealth
 
 from dotenv import load_dotenv
 
@@ -455,7 +455,7 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = ""
                 )
             )
             page = context.new_page()
-            stealth_sync(page)
+            Stealth().apply_stealth_sync(page)
 
             logger.info("Navigating to %s", apply_url)
             page.goto(apply_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)

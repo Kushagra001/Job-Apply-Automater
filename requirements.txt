@@ -27,4 +27,4 @@ python-dotenv==1.0.1         # Load .env for local development
 pytest==8.2.2
 pytest-asyncio==0.23.7
 
-playwright-stealth
+playwright-stealth==2.0.3
