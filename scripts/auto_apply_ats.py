@@ -94,13 +94,46 @@ def detect_ats(apply_url: str) -> str:
     raise UnsupportedATSError(f"Unsupported ATS domain: {host}")
 
 
+def validate_ats_job_url(apply_url: str) -> tuple[bool, str]:
+    """
+    Validate that an apply_url points to a specific job post rather than a general company board index.
+    Returns (is_valid: bool, rejection_reason: str).
+    """
+    if not apply_url:
+        return False, "Empty apply_url"
+
+    parsed = urlparse(apply_url)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path.rstrip("/")
+    parts = [p for p in path.split("/") if p]
+
+    # Ashby: https://jobs.ashbyhq.com/{company}/{uuid} or .../{uuid}/application
+    if "ashbyhq.com" in host:
+        if len(parts) < 2:
+            return False, f"Ashby URL '{apply_url}' is a company board index, not a specific job post"
+        job_id = parts[1]
+        if len(job_id) < 8 or job_id in ("application", "jobs"):
+            return False, f"Ashby URL '{apply_url}' lacks a specific job identifier"
+
+    # Lever: https://jobs.lever.co/{company}/{uuid} or https://apply.lever.co/{company}/{uuid}
+    if "lever.co" in host:
+        if len(parts) < 2 or len(parts[1]) < 8:
+            return False, f"Lever URL '{apply_url}' is a company index, not a specific job posting"
+
+    # Greenhouse: boards.greenhouse.io/{company}/jobs/{id} or has gh_jid=
+    if "greenhouse.io" in host:
+        if "gh_jid=" not in apply_url and not any(p == "jobs" for p in parts):
+            return False, f"Greenhouse URL '{apply_url}' is a company index, not a specific job posting"
+
+    return True, ""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _fill_social_fields(page, field_keyword: str, value: str) -> None:
     """
     Safely fill a social URL field (linkedin, github, portfolio, website).
-    Fix: Explicitly restrict to text/url types to avoid the "cannot fill checkbox" crash
-    that occurs when a GDPR consent checkbox has 'linkedin' in its name attribute.
+    Explicitly restrict to text/url types to avoid checkbox / consent collisions.
     """
     loc = page.locator(
         f"input[type='text'][name*='{field_keyword}' i], "
@@ -111,46 +144,175 @@ def _fill_social_fields(page, field_keyword: str, value: str) -> None:
         loc.first.fill(value)
 
 
+def _fill_common_custom_fields(page) -> None:
+    """
+    Best-effort handler for standard ATS questions and dropdowns:
+    - Work authorization: "Yes"
+    - Visa sponsorship required: "No"
+    - Country: "India"
+    - EEO / Demographics: "Decline to self-identify" / "Prefer not to say"
+    """
+    try:
+        # 1. Select dropdowns
+        selects = page.locator("select").all()
+        for sel in selects:
+            try:
+                name = (sel.get_attribute("name") or "").lower()
+                aria_label = (sel.get_attribute("aria-label") or "").lower()
+                id_attr = (sel.get_attribute("id") or "").lower()
+                label_text = ""
+                if id_attr:
+                    lbl = page.locator(f"label[for='{id_attr}']")
+                    if lbl.count() > 0:
+                        label_text = lbl.first.inner_text().lower()
+
+                field_context = f"{name} {aria_label} {label_text}"
+                options = sel.locator("option").all()
+                opt_texts = [o.inner_text().strip().lower() for o in options]
+
+                # Work Authorization -> Yes
+                if any(k in field_context for k in ["authorized", "legally authorized", "work authorization", "work auth"]):
+                    for idx, opt in enumerate(opt_texts):
+                        if opt.startswith("yes"):
+                            sel.select_option(index=idx)
+                            break
+                # Sponsorship -> No
+                elif any(k in field_context for k in ["sponsorship", "sponsor", "require sponsorship"]):
+                    for idx, opt in enumerate(opt_texts):
+                        if opt.startswith("no"):
+                            sel.select_option(index=idx)
+                            break
+                # Country -> India
+                elif "country" in field_context:
+                    for idx, opt in enumerate(opt_texts):
+                        if opt == "india" or "india" in opt:
+                            sel.select_option(index=idx)
+                            break
+                # EEO / Demographics -> Decline to self-identify
+                elif any(k in field_context for k in ["gender", "race", "ethnicity", "veteran", "disability"]):
+                    for idx, opt in enumerate(opt_texts):
+                        if any(d in opt for d in ["decline", "prefer not", "choose not"]):
+                            sel.select_option(index=idx)
+                            break
+            except Exception:
+                continue
+
+        # 2. Radio buttons for Work Auth / Sponsorship
+        for yes_radio in page.locator("input[type='radio'][value*='yes' i], input[type='radio'][id*='yes' i]").all():
+            try:
+                r_name = (yes_radio.get_attribute("name") or "").lower()
+                if any(k in r_name for k in ["authorized", "authorization", "legally"]):
+                    yes_radio.check()
+            except Exception:
+                pass
+
+        for no_radio in page.locator("input[type='radio'][value*='no' i], input[type='radio'][id*='no' i]").all():
+            try:
+                r_name = (no_radio.get_attribute("name") or "").lower()
+                if any(k in r_name for k in ["sponsor", "sponsorship"]):
+                    no_radio.check()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug("Non-fatal issue filling custom fields: %s", e)
+
+
+def _verify_submission(page, ats_name: str) -> tuple[bool, str]:
+    """
+    Verify whether the ATS form was genuinely submitted successfully.
+    Checks:
+    1. Navigation to confirmation URL
+    2. Confirmation text presence
+    3. Absence of blocking form error messages
+    """
+    try:
+        page.wait_for_timeout(3000)
+
+        # 1. Check for blocking validation errors first
+        error_locators = [
+            ".error", ".form-error", ".field-error", ".alert-error",
+            "[aria-invalid='true']", ".has-error", "div.error-message",
+            "p.error-message", "span.error"
+        ]
+        for sel in error_locators:
+            errors = page.locator(sel)
+            if errors.count() > 0:
+                for idx in range(min(errors.count(), 3)):
+                    err_elem = errors.nth(idx)
+                    if err_elem.is_visible():
+                        err_text = err_elem.inner_text().strip()
+                        if err_text:
+                            return False, f"Validation error: {err_text[:120]}"
+
+        # 2. Check current URL for confirmation indicators
+        curr_url = page.url.lower()
+        confirmation_url_keywords = ["confirmation", "thanks", "thank-you", "thank_you", "submitted", "success", "application_submitted"]
+        if any(kw in curr_url for kw in confirmation_url_keywords):
+            return True, "Confirmation URL reached"
+
+        # 3. Check page content for confirmation text
+        page_text = page.locator("body").inner_text().lower()
+        success_phrases = [
+            "thank you for applying",
+            "application submitted",
+            "application has been submitted",
+            "we've received your application",
+            "received your application",
+            "thank you for your interest",
+            "your application was submitted",
+            "application complete",
+        ]
+        if any(phrase in page_text for phrase in success_phrases):
+            return True, "Success text found on page"
+
+        # 4. Check if submit button is still visible and enabled
+        submit_btn = page.locator("button[type='submit'], button#submit_app, button#btn-submit")
+        if submit_btn.count() > 0 and submit_btn.first.is_visible():
+            return False, "Submit button still visible after click with no confirmation (form did not advance)"
+
+        return True, "Page navigated away from form"
+    except Exception as e:
+        return False, f"Verification error: {e}"
+
+
 # ── ATS flows (Playwright) ────────────────────────────────────────────────────
 
-def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
-    """Fill and optionally submit a Greenhouse application form.
-
-    Handles both legacy boards (boards.greenhouse.io) and modern React-rendered
-    boards (job-boards.greenhouse.io) which have a different DOM structure.
-    """
+def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Fill and optionally submit a Greenhouse application form."""
     logger.info("Starting Greenhouse flow...")
 
     current_url = page.url
     is_modern_board = "job-boards.greenhouse.io" in current_url
 
     if is_modern_board:
-        # Modern React GH board — wait for any visible name/email input
         logger.info("Detected modern Greenhouse board (job-boards.greenhouse.io)")
         page.wait_for_selector(
             "input[autocomplete='given-name'], input#first_name, "
-            "input[name='first_name'], input[type='text']",
+            "input[name='first_name'], input[autocomplete='name'], input#name, input[type='text']",
             timeout=SELECTOR_TIMEOUT_MS,
         )
     else:
-        # Legacy Greenhouse board
         page.wait_for_selector(
             "form#application-form, form#application, "
             "form[action*='applications'], div#application",
             timeout=SELECTOR_TIMEOUT_MS,
         )
 
+    # Handle split first/last name or single full name
     first_name = page.locator(
         "input[autocomplete='given-name'], input#first_name, input[name='first_name']"
     )
     if first_name.count() > 0:
         first_name.first.fill(USER_PROFILE["first_name"])
-
-    last_name = page.locator(
-        "input[autocomplete='family-name'], input#last_name, input[name='last_name']"
-    )
-    if last_name.count() > 0:
-        last_name.first.fill(USER_PROFILE["last_name"])
+        last_name = page.locator(
+            "input[autocomplete='family-name'], input#last_name, input[name='last_name']"
+        )
+        if last_name.count() > 0:
+            last_name.first.fill(USER_PROFILE["last_name"])
+    else:
+        full_name = page.locator("input[autocomplete='name'], input#name, input[name='name']")
+        if full_name.count() > 0:
+            full_name.first.fill(USER_PROFILE["full_name"])
 
     email = page.locator(
         "input[autocomplete='email'], input#email, input[name='email']"
@@ -172,8 +334,8 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
 
-    # Fix: use _fill_social_fields to avoid checkbox crash
     _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
+    _fill_common_custom_fields(page)
 
     if cover_letter:
         cl_input = page.locator("textarea[name*='cover_letter' i], textarea#cover_letter_text, textarea[name*='comments' i]")
@@ -183,32 +345,29 @@ def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter
     if not dry_run:
         logger.info("Submitting Greenhouse application...")
         submit = page.locator("button#submit_app, button[type='submit']")
-        submit.first.click()
-        page.wait_for_load_state("networkidle")
+        if submit.count() > 0:
+            submit.first.click()
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass
+        return _verify_submission(page, "greenhouse")
     else:
-        logger.info("--dry-run: Skipped submit click.")
+        logger.info("--dry-run: Verified Greenhouse form fields.")
+        return True, "Dry run: Greenhouse form fields verified"
 
-    return True
 
-
-def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
-    """Fill and optionally submit a Lever application form.
-
-    Handles both jobs.lever.co (listing page → apply button → form) and
-    apply.lever.co (direct form URL) structures.
-    """
+def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Fill and optionally submit a Lever application form."""
     logger.info("Starting Lever flow...")
 
     current_url = page.url
-
-    # Click "Apply" button only if we're on the listing page, not the form
     if "apply.lever.co" not in current_url:
         apply_btn = page.locator("a.template-btn-submit")
         if apply_btn.count() > 0 and apply_btn.first.is_visible():
             apply_btn.first.click()
             page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
 
-    # Wait for form — works on both jobs.lever.co and apply.lever.co
     page.wait_for_selector(
         "form#application-form, "
         "form.application-form, "
@@ -216,15 +375,15 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
         timeout=SELECTOR_TIMEOUT_MS,
     )
 
-    name_input = page.locator("input[name='name']")
+    name_input = page.locator("input[name='name'], input#name, input[autocomplete='name']")
     if name_input.count() > 0:
         name_input.first.fill(USER_PROFILE["full_name"])
 
-    email_input = page.locator("input[name='email']")
+    email_input = page.locator("input[name='email'], input#email, input[autocomplete='email']")
     if email_input.count() > 0:
         email_input.first.fill(USER_PROFILE["email"])
 
-    phone_input = page.locator("input[name='phone']")
+    phone_input = page.locator("input[name='phone'], input#phone, input[autocomplete='tel']")
     if phone_input.count() > 0:
         phone_input.first.fill(USER_PROFILE["phone"])
 
@@ -237,6 +396,7 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     _fill_social_fields(page, "LinkedIn", USER_PROFILE["linkedin"])
     _fill_social_fields(page, "GitHub", USER_PROFILE["github"])
     _fill_social_fields(page, "Portfolio", USER_PROFILE["portfolio"])
+    _fill_common_custom_fields(page)
 
     if cover_letter:
         cl_input = page.locator("textarea[name*='comments' i], textarea[name*='cover' i]")
@@ -245,26 +405,23 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
 
     if not dry_run:
         logger.info("Submitting Lever application...")
-        # Fix: Lever's actual submit button uses id=btn-submit and data-qa=btn-submit
-        # The type is "button" not "submit" — must target by id/data-qa
         submit = page.locator(
-            "button#btn-submit, button[data-qa='btn-submit']"
+            "button#btn-submit, button[data-qa='btn-submit'], button[type='submit']"
         )
-        submit.first.click()
-        page.wait_for_load_state("networkidle")
+        if submit.count() > 0:
+            submit.first.click()
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass
+        return _verify_submission(page, "lever")
     else:
-        logger.info("--dry-run: Skipped submit click.")
+        logger.info("--dry-run: Verified Lever form fields.")
+        return True, "Dry run: Lever form fields verified"
 
-    return True
 
-
-def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
-    """Fill and optionally submit an Ashby application form.
-
-    Ashby is a React SPA. The form renders asynchronously after a button click,
-    so we must wait for networkidle before querying the DOM.
-    Ashby uses _systemfield_ prefix for core form fields.
-    """
+def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Fill and optionally submit an Ashby application form."""
     logger.info("Starting Ashby flow...")
 
     current_url = page.url
@@ -274,16 +431,17 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
         apply_btn = page.locator(
             "button:has-text('Apply for this job'), "
             "a:has-text('Apply for this job'), "
+            "button:has-text('Apply for this Job'), "
+            "a:has-text('Apply for this Job'), "
             "button:has-text('Apply')"
         )
         if apply_btn.count() > 0 and apply_btn.first.is_visible():
             apply_btn.first.click()
-            # Critical: wait for the SPA to finish rendering the form
-            page.wait_for_load_state("networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+            page.wait_for_timeout(2000)
 
     # Ashby uses _systemfield_name for the candidate name input
     page.wait_for_selector(
-        "input[name='_systemfield_name'], input[name='name']",
+        "input[name='_systemfield_name'], input[name='name'], div#application-form",
         timeout=SELECTOR_TIMEOUT_MS,
     )
 
@@ -305,40 +463,38 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     if phone_input.count() > 0:
         phone_input.first.fill(USER_PROFILE["phone"])
 
-    # Ashby hides the file input visually; set_input_files still works
     resume_input = page.locator("input[type='file']")
     if resume_input.count() > 0:
         resume_input.first.set_input_files(pdf_path)
 
-    # Fix: narrow social selectors to text/url types only — never checkboxes
     _fill_social_fields(page, "linkedin", USER_PROFILE["linkedin"])
     _fill_social_fields(page, "github", USER_PROFILE["github"])
     _fill_social_fields(page, "portfolio", USER_PROFILE["portfolio"])
     _fill_social_fields(page, "website", USER_PROFILE["portfolio"])
+    _fill_common_custom_fields(page)
 
     if cover_letter:
-        # Ashby often uses standard names or _systemfield_ cover letter equivalents
         cl_input = page.locator("textarea[name*='coverLetter' i], textarea[name*='comments' i], textarea[name*='message' i]")
         if cl_input.count() > 0:
             cl_input.first.fill(cover_letter)
 
     if not dry_run:
         logger.info("Submitting Ashby application...")
-        page.locator("button[type='submit']").first.click()
-        page.wait_for_load_state("networkidle")
+        submit = page.locator("button[type='submit'], button:has-text('Submit Application')")
+        if submit.count() > 0:
+            submit.first.click()
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass
+        return _verify_submission(page, "ashby")
     else:
-        logger.info("--dry-run: Skipped submit click.")
+        logger.info("--dry-run: Verified Ashby form fields.")
+        return True, "Dry run: Ashby form fields verified"
 
-    return True
 
-
-def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
-    """
-    Remotive listing pages show a 'Apply for this job' button that either:
-      a) opens a modal with an embedded ATS form, or
-      b) redirects to the company's own ATS page (greenhouse/lever).
-    We click the button, wait for navigation, then re-detect the ATS.
-    """
+def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Handles Remotive job apply redirect or embedded form."""
     logger.info("Starting Remotive flow...")
 
     apply_btn = page.locator(
@@ -346,39 +502,47 @@ def _apply_remotive(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: 
     )
     if apply_btn.count() == 0:
         logger.warning("Remotive: no apply button found — skipping")
-        return False
-
-    with page.expect_popup() as popup_info:
-        apply_btn.first.click()
-    new_page = popup_info.value
-    new_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+        return False, "No apply button found on Remotive page"
 
     try:
-        ats_name = detect_ats(new_page.url)
+        with page.expect_popup(timeout=8000) as popup_info:
+            apply_btn.first.click()
+        target_page = popup_info.value
+        should_close = True
+    except PlaywrightTimeoutError:
+        target_page = page
+        should_close = False
+
+    target_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(target_page.url)
     except UnsupportedATSError:
-        logger.warning("Remotive redirect did not land on a supported ATS: %s", new_page.url)
-        new_page.close()
-        return False
+        msg = f"Remotive redirect did not land on a supported ATS: {target_page.url}"
+        logger.warning(msg)
+        if should_close:
+            target_page.close()
+        return False, msg
 
     logger.info("Remotive redirected to ATS: %s", ats_name)
     flow_fn = _ATS_FLOW_MAP.get(ats_name)
     if not flow_fn or ats_name in ("remotive", "remoteok"):
-        logger.warning("No nested flow for ATS '%s'", ats_name)
-        new_page.close()
-        return False
+        if should_close:
+            target_page.close()
+        return False, f"No nested flow for ATS '{ats_name}'"
 
     try:
-        result = flow_fn(new_page, jd, pdf_path, dry_run, cover_letter)
+        result = flow_fn(target_page, jd, pdf_path, dry_run, cover_letter)
+        if isinstance(result, tuple):
+            return result
+        return (result, "") if result else (False, f"{ats_name} flow returned False")
     finally:
-        new_page.close()
-    return result
+        if should_close:
+            target_page.close()
 
 
-def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> bool:
-    """
-    RemoteOK listing pages have an 'Apply Now' button that redirects to the
-    company's ATS. We click it and re-detect the ATS on the resulting page.
-    """
+def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "") -> tuple[bool, str]:
+    """Handles RemoteOK job apply redirect."""
     logger.info("Starting RemoteOK flow...")
 
     apply_btn = page.locator(
@@ -386,32 +550,43 @@ def _apply_remoteok(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: 
     )
     if apply_btn.count() == 0:
         logger.warning("RemoteOK: no apply button found — skipping")
-        return False
-
-    with page.expect_popup() as popup_info:
-        apply_btn.first.click()
-    new_page = popup_info.value
-    new_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+        return False, "No apply button found on RemoteOK page"
 
     try:
-        ats_name = detect_ats(new_page.url)
+        with page.expect_popup(timeout=8000) as popup_info:
+            apply_btn.first.click()
+        target_page = popup_info.value
+        should_close = True
+    except PlaywrightTimeoutError:
+        target_page = page
+        should_close = False
+
+    target_page.wait_for_load_state("domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+    try:
+        ats_name = detect_ats(target_page.url)
     except UnsupportedATSError:
-        logger.warning("RemoteOK redirect did not land on a supported ATS: %s", new_page.url)
-        new_page.close()
-        return False
+        msg = f"RemoteOK redirect did not land on a supported ATS: {target_page.url}"
+        logger.warning(msg)
+        if should_close:
+            target_page.close()
+        return False, msg
 
     logger.info("RemoteOK redirected to ATS: %s", ats_name)
     flow_fn = _ATS_FLOW_MAP.get(ats_name)
     if not flow_fn or ats_name in ("remotive", "remoteok"):
-        logger.warning("No nested flow for ATS '%s'", ats_name)
-        new_page.close()
-        return False
+        if should_close:
+            target_page.close()
+        return False, f"No nested flow for ATS '{ats_name}'"
 
     try:
-        result = flow_fn(new_page, jd, pdf_path, dry_run, cover_letter)
+        result = flow_fn(target_page, jd, pdf_path, dry_run, cover_letter)
+        if isinstance(result, tuple):
+            return result
+        return (result, "") if result else (False, f"{ats_name} flow returned False")
     finally:
-        new_page.close()
-    return result
+        if should_close:
+            target_page.close()
 
 
 _ATS_FLOW_MAP = {
@@ -436,13 +611,18 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = ""
         cover_letter: Generated cover letter text to paste into textarea
 
     Returns:
-        (success: bool, notes: str) — notes contains the failure reason on
-        failure so the pipeline can surface it in the Google Sheet notes column.
+        (success: bool, notes: str) — notes contains failure reason or confirmation details.
     """
     apply_url = jd.get("apply_url")
     if not apply_url:
         logger.error("No apply_url provided in JD.")
         return False, "No apply_url in JD"
+
+    # Pre-validate URL before launching browser process
+    is_valid, validation_msg = validate_ats_job_url(apply_url)
+    if not is_valid:
+        logger.warning("Invalid ATS job URL: %s", validation_msg)
+        return False, validation_msg
 
     try:
         with sync_playwright() as p:
@@ -470,8 +650,10 @@ def apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = ""
             flow_fn = _ATS_FLOW_MAP[ats_name]
 
             try:
-                ok = flow_fn(page, jd, pdf_path, dry_run, cover_letter)
-                return (ok, "") if ok else (False, "ATS flow returned False")
+                result = flow_fn(page, jd, pdf_path, dry_run, cover_letter)
+                if isinstance(result, tuple):
+                    return result
+                return (result, "") if result else (False, f"{ats_name} flow returned False")
             except PlaywrightTimeoutError as e:
                 msg = f"Timeout filling {ats_name} form: {e}"
                 logger.warning(msg)

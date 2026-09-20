@@ -144,7 +144,7 @@ def main():
         # ── Volume path (20 ≤ score < 55): base resume, no tailoring ────
         if score < SCORE_TAILOR_THRESHOLD:
             logger.info(f"Volume path: Score {score} — applying with base resume (no tailoring).")
-            base_variant = _keyword_pick_variant(jd)
+            base_variant = best_variant if (RESUMES_DIR / f"{best_variant}.json").exists() else _keyword_pick_variant(jd)
             try:
                 variant_path = RESUMES_DIR / f"{base_variant}.json"
                 variant_json = json.loads(variant_path.read_text(encoding="utf-8"))

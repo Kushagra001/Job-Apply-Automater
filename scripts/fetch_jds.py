@@ -152,7 +152,7 @@ JUNIOR_TITLE_KEYWORDS: frozenset[str] = frozenset([
 INDIA_KEYWORDS: frozenset[str] = frozenset([
     "india", " in ", "india,", "bangalore", "bengaluru", "mumbai",
     "pune", "hyderabad", "chennai", "delhi", "gurugram", "noida",
-    "kolkata", "ahmedabad", "remote india", "india remote",
+    "kolkata", "ahmedabad", "jaipur", "rajasthan", "remote india", "india remote",
 ])
 
 
@@ -171,12 +171,33 @@ def _is_senior_only(title: str) -> bool:
     return False
 
 
+EXCLUDED_GEO_KEYWORDS: tuple[str, ...] = (
+    "us only", "u.s. only", "usa only", "united states only", "us-only",
+    "north america", "amer", "americas", "emea", "latam", "apac only",
+    "uk only", "canada only", "europe only", "germany only",
+    "must reside in", "must be located in", "us citizenship",
+    "authorized to work in the us", "authorized to work in the united states",
+)
+
+
 def is_location_ok(location: str, remote: bool) -> bool:
-    """Return True if the job is remote OR located in India."""
-    if remote:
-        return True
+    """
+    Return True if the job is accessible to an India-based applicant:
+    - Located in India, OR
+    - Remote WITHOUT restrictive foreign geo-fencing (e.g. US/EU/AMER/EMEA only).
+    """
     loc = (location or "").lower()
-    return any(kw in loc for kw in INDIA_KEYWORDS)
+    # Explicit India location always OK
+    if any(kw in loc for kw in INDIA_KEYWORDS):
+        return True
+
+    # Remote roles must not be geo-restricted to foreign regions
+    if remote:
+        if any(kw in loc for kw in EXCLUDED_GEO_KEYWORDS):
+            return False
+        return True
+
+    return False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -547,9 +568,14 @@ def fetch_hackernews() -> list[dict]:
             if not is_location_ok(location, is_remote_hn):
                 continue
 
+            from scripts.auto_apply_ats import _ATS_DOMAIN_MAP, validate_ats_job_url
+
             for raw_url in url_regex.findall(text):
                 clean_url = raw_url.strip(').,;:>"\'')
                 if any(domain in clean_url for domain in _ATS_DOMAIN_MAP.keys()):
+                    valid, _ = validate_ats_job_url(clean_url)
+                    if not valid:
+                        continue
                     listings.append(_jd(
                         title=title,
                         company=company,
@@ -606,25 +632,21 @@ def fetch_all() -> list[dict]:
         combined.extend(items)
     deduped = _dedup(combined)
 
+    # Validate all ATS URLs unconditionally before queuing
+    from scripts.auto_apply_ats import validate_ats_job_url
+    before_val_len = len(deduped)
+    deduped = [jd for jd in deduped if validate_ats_job_url(jd.get("apply_url", ""))[0]]
+    if before_val_len != len(deduped):
+        logger.info("fetch_all — filtered out %d invalid/board-only ATS URLs", before_val_len - len(deduped))
+
     # Filter against persistent store (Google Sheets)
     try:
         from scripts.log_and_notify import get_processed_urls
         processed_urls = get_processed_urls()
         if processed_urls:
             before_len = len(deduped)
-            
-            def is_valid_jd(jd):
-                url = jd.get("apply_url", "")
-                if url in processed_urls:
-                    return False
-                # Filter out Ashby boards without a specific job UUID
-                # e.g. https://jobs.ashbyhq.com/brex (len=4) vs https://jobs.ashbyhq.com/brex/123-abc (len=5)
-                if "ashbyhq.com" in url and len(url.rstrip("/").split("/")) < 5:
-                    return False
-                return True
-                
-            deduped = [jd for jd in deduped if is_valid_jd(jd)]
-            logger.info("fetch_all — filtered out %d already processed or invalid URLs", before_len - len(deduped))
+            deduped = [jd for jd in deduped if jd.get("apply_url", "") not in processed_urls]
+            logger.info("fetch_all — filtered out %d already processed URLs", before_len - len(deduped))
     except Exception:
         logger.warning("fetch_all — could not load processed URLs; continuing without filter")
 

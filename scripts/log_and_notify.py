@@ -60,17 +60,23 @@ _DIGEST_BUFFER = {
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 
+_WORKSHEET_CACHE: gspread.Worksheet | None = None
+
 def _get_sheet():
     """
-    Authenticate with gspread and return the target worksheet.
+    Authenticate with gspread and return the target worksheet (cached per process).
     Raises EnvironmentError if credentials are missing.
     """
+    global _WORKSHEET_CACHE
+    if _WORKSHEET_CACHE is not None:
+        return _WORKSHEET_CACHE
+
     sheet_id = os.environ.get("GOOGLE_SHEET_ID")
     sa_json = os.environ.get("GOOGLE_SA_JSON")
-    
+
     if not sheet_id or not sa_json:
         raise EnvironmentError("GOOGLE_SHEET_ID or GOOGLE_SA_JSON is missing")
-    
+
     try:
         creds_dict = json.loads(sa_json)
         creds = Credentials.from_service_account_info(
@@ -78,8 +84,8 @@ def _get_sheet():
             scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
         client = gspread.authorize(creds)
-        sheet = client.open_by_key(sheet_id).sheet1
-        return sheet
+        _WORKSHEET_CACHE = client.open_by_key(sheet_id).sheet1
+        return _WORKSHEET_CACHE
     except Exception as e:
         raise EnvironmentError(f"Failed to authenticate with Google Sheets: {e}")
 

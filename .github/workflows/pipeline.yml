@@ -35,7 +35,7 @@ jobs:
         run: pip install -r requirements.txt
         
       - name: Install Playwright browsers
-        run: playwright install chromium
+        run: playwright install --with-deps chromium
         
       - name: Run Pipeline
         env:
@@ -47,3 +47,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: python scripts/run_pipeline.py
+
+      - name: Upload Generated Resumes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tailored-resumes
+          path: output/*.pdf
+          retention-days: 30

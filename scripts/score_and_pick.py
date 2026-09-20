@@ -71,41 +71,49 @@ FALLBACK_MODELS = [
     stop=stop_after_attempt(3),
     retry=retry_if_exception_type(GroqError)
 )
-def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
+def score_jd_against_all_variants(jd: dict, variants: dict[str, dict]) -> dict[str, Any]:
     """
-    Call Groq to score a single (JD, variant) pair.
-    Returns partial Score result: {score, missing_skills, reasoning}.
+    Call Groq ONCE to evaluate the JD against all resume variants simultaneously.
+    Returns: {best_variant, score, missing_skills, reasoning}.
+    Reduces LLM calls and latency by 75%.
     """
     jd_description = jd.get('description', '').strip()
     description_note = (
         "NOTE: The job description body is empty or very short. "
-        "Score primarily based on the job title, company, and your knowledge of what that role typically requires. "
+        "Score primarily based on the job title, company, and typical requirements for that role. "
         "Be generous — if the title clearly matches the candidate's stack, score 70+."
         if len(jd_description) < 100 else ""
     )
-    
+
+    variants_summary = {}
+    for vname, vdata in variants.items():
+        variants_summary[vname] = {
+            "skills": vdata.get("skills", []),
+            "summary": vdata.get("summary", ""),
+            "experience_titles": [exp.get("title", "") for exp in vdata.get("experience", [])]
+        }
+
     prompt = f"""
-    You are an expert technical recruiter scoring a job description against a candidate's resume.
+    You are an expert technical recruiter matching a job description against a candidate's 4 resume variants.
     {description_note}
-    
+
     Job:
     Title: {jd.get('title', '')}
     Company: {jd.get('company', '')}
     Location: {jd.get('location', '')}
-    Description: {jd_description[:3000] if jd_description else '(not provided — use title/company to infer role requirements)'}
-    
-    Candidate Resume Variant ({variant.get('variant', 'unknown')}):
-    Skills: {json.dumps(variant.get('skills', []))}
-    Summary: {variant.get('summary', '')}
-    Experience titles: {[exp.get('title', '') for exp in variant.get('experience', [])]}
-    
+    Description: {jd_description[:3000] if jd_description else '(not provided — use title/company to infer requirements)'}
+
+    Candidate Resume Variants:
+    {json.dumps(variants_summary, indent=2)}
+
+    Evaluate the JD against all variants and select the single BEST MATCHING variant.
     Return JSON with exactly these fields:
-    - "score": integer 0-100 (match quality). Use 70+ if title clearly aligns with candidate stack.
-    - "missing_skills": list of strings for critical skills in JD but absent from resume.
-    - "reasoning": 1-2 sentence explanation.
+    - "best_variant": string, must be one of {list(variants.keys())}.
+    - "score": integer 0-100 (match quality of the chosen best variant). Use 70+ if the role clearly aligns with the candidate's stack.
+    - "missing_skills": list of strings for critical skills in the JD that are absent from this best variant.
+    - "reasoning": 1-2 sentence explanation of why this variant is the best match.
     """
-    # Fix #12: lazy-init client — only reads GROQ_API_KEY when actually called,
-    #          not at import time, keeping test isolation clean.
+
     client = Groq()
     last_error = None
 
@@ -126,8 +134,15 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
             result = json.loads(response.choices[0].message.content)
             if isinstance(result, list):
                 result = result[0] if result else {}
+
+            best_v = result.get("best_variant", "")
+            if best_v not in variants and variants:
+                # Default to first variant if model returned an unlisted name
+                best_v = list(variants.keys())[0]
+
             return {
-                "score": result.get("score", 0),
+                "best_variant": best_v,
+                "score": int(result.get("score", 0)),
                 "missing_skills": result.get("missing_skills", []),
                 "reasoning": result.get("reasoning", "")
             }
@@ -135,50 +150,56 @@ def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
             logger.warning("Groq API error for model %s: %s", model_name, e)
             last_error = e
             if forced_model:
-                raise e  # User explicitly forced a model — don't silently fall back
+                raise e
             logger.info("Attempting next fallback model...")
         except Exception as e:
             logger.error("Unexpected error scoring JD: %s", e)
-            return {"score": 0, "missing_skills": [], "reasoning": f"Error: {e}"}
+            default_v = list(variants.keys())[0] if variants else "backend-node"
+            return {"best_variant": default_v, "score": 0, "missing_skills": [], "reasoning": f"Error: {e}"}
 
     if last_error:
         raise last_error
 
-    return {"score": 0, "missing_skills": [], "reasoning": "Failed to score JD after trying all fallback models."}
+    default_v = list(variants.keys())[0] if variants else "backend-node"
+    return {"best_variant": default_v, "score": 0, "missing_skills": [], "reasoning": "Failed after trying fallback models."}
 
+
+# ── Backward-compatible single-variant scorer ─────────────────────────────────
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(GroqError)
+)
+def score_jd_against_variant(jd: dict, variant: dict) -> dict[str, Any]:
+    """Call Groq to score a single (JD, variant) pair (kept for compatibility)."""
+    return score_jd_against_all_variants(jd, {variant.get("variant", "variant"): variant})
 
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def score_and_pick(jd: dict) -> dict:
     """
-    Score JD against all four variants, return the best Score result.
+    Score JD against all four variants in a single consolidated Groq call.
     If best score < SCORE_THRESHOLD, result includes status="skipped".
     """
     variants = load_all_variants()
     if not variants:
         logger.error("No variants found in resumes/")
         return {"jd_id": f"{jd.get('company', '')}_{jd.get('title', '')}", "best_variant": "", "score": 0, "status": "error"}
-    
-    best_variant_name = ""
-    best_score = -1
-    best_result = {}
 
-    for name, variant_data in variants.items():
-        logger.info("Scoring JD against variant: %s", name)
-        res = score_jd_against_variant(jd, variant_data)
-        if res["score"] > best_score:
-            best_score = res["score"]
-            best_variant_name = name
-            best_result = res
-        time.sleep(2)  # Delay between scoring variants to respect rate limits
-    
+    logger.info("Scoring JD against all variants via consolidated Groq call...")
+    res = score_jd_against_all_variants(jd, variants)
+
+    best_variant_name = res.get("best_variant", list(variants.keys())[0])
+    score = res.get("score", 0)
+
     final_result = {
         "jd_id": f"{jd.get('company', '')}_{jd.get('title', '')}".replace(" ", "_").lower(),
         "best_variant": best_variant_name,
-        "score": best_result.get("score", 0),
-        "missing_skills": best_result.get("missing_skills", []),
-        "reasoning": best_result.get("reasoning", "")
+        "score": score,
+        "missing_skills": res.get("missing_skills", []),
+        "reasoning": res.get("reasoning", "")
     }
 
     if final_result["score"] < SCORE_THRESHOLD:
