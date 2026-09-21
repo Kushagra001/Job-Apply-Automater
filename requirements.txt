@@ -3,7 +3,7 @@ groq==0.9.0                  # Groq SDK (Llama 3.3 70B)
 httpx<0.28.0                 # Pin httpx to fix Groq proxy error
 
 # ── Browser automation ────────────────────────────────────────────────────────
-playwright==1.44.0           # Chromium scraping + ATS form filling
+playwright>=1.48.0,<2.0.0     # Chromium scraping + ATS form filling (supports Ubuntu 24.04+ & 22.04)
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 gspread==6.1.2               # Sheets read/write via service account
