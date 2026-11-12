@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -80,6 +81,15 @@ COMPACT_STYLES = [
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
+def _sanitize_slug(text: str, max_len: int = 50, fallback: str = "company") -> str:
+    """Normalize arbitrary company/variant text into a safe, bounded filename slug."""
+    slug = re.sub(r"[^a-z0-9_-]+", "_", (text or "").lower())
+    slug = re.sub(r"_+", "_", slug).strip("_-")
+    if len(slug) > max_len:
+        slug = slug[:max_len].strip("_-")
+    return slug or fallback
+
+
 def render_pdf(tailored_json: dict, company: str, date: str | None = None) -> str:
     """
     Render tailored_json to PDF and return the output path.
@@ -97,8 +107,8 @@ def render_pdf(tailored_json: dict, company: str, date: str | None = None) -> st
     if date is None:
         date = datetime.now().strftime("%Y%m%d")
 
-    variant = tailored_json.get("variant", "unknown")
-    slug_company = company.lower().replace(" ", "_")
+    variant = _sanitize_slug(str(tailored_json.get("variant", "unknown")), max_len=30, fallback="unknown")
+    slug_company = _sanitize_slug(company, max_len=50, fallback="company")
     output_filename = f"{slug_company}_{variant}_{date}.pdf"
     output_path = OUTPUT_DIR / output_filename
 

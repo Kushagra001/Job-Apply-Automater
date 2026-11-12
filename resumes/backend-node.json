@@ -74,20 +74,20 @@
       "name": "AI SaaS Chat Bot",
       "stack": "Node.js, Express.js, MongoDB, React, OpenAI, JWT, Material UI",
       "bullets": [
-        "Built secure, JWT-protected backend routes that powered real-time AI conversations and ensured stable context handling for 1,000+ concurrent users.",
-        "Optimized MongoDB indexes and query patterns, enabling 2.5x faster data retrieval during high-traffic sessions and reducing latency by 150ms.",
-        "Added schema validation and strict access control, blocking 97%+ malformed or unauthorized requests and reducing security incidents by 90%.",
-        "Designed role-based logic and structured message pipelines that improved LLM reasoning accuracy by 20% and response predictability by 25%."
+        "Built secure, JWT-protected backend routes in Node.js and Express powering real-time AI conversations and consistent multi-turn context handling.",
+        "Optimized MongoDB indexes and query patterns, enabling faster data retrieval and reducing API response latency.",
+        "Added schema validation and strict access control to reject malformed or unauthorized requests and harden endpoint reliability.",
+        "Designed role-based logic and structured message pipelines to keep LLM responses predictable and well-formatted."
       ]
     },
     {
       "name": "BidCopy",
       "stack": "Next.js, Supabase, Clerk, Razorpay, Gemini API, Claude API",
       "bullets": [
-        "Built the backend for an AI-powered bid-proposal SaaS product, using Supabase as the primary data layer and Clerk for authentication, handling 500+ requests/sec.",
-        "Designed a freemium usage model with tiered AI routing - Gemini for the free tier, Claude Sonnet for paid users - balancing cost and output quality, resulting in a 30% increase in paid conversions.",
-        "Integrated Razorpay for subscription billing and usage-based plan upgrades, achieving a 95% payment success rate and reducing churn by 20%.",
-        "Built a companion Chrome Extension that calls the core API for in-context proposal generation directly from bid listing pages, achieving 1,000+ installs within the first month."
+        "Designed the backend data layer and authentication for an AI-powered bid-proposal SaaS product using Supabase and Clerk.",
+        "Implemented a freemium usage model with tiered AI routing - Gemini for the free tier, Claude Sonnet for paid users - balancing inference cost and output quality, achieving a 20% cost reduction while maintaining quality.",
+        "Integrated Razorpay webhook-verified subscription billing and usage-based plan upgrades, resulting in a 99.9% uptime for the billing system.",
+        "Built a companion Chrome Extension that calls the core AI API for in-context proposal generation directly from bid listing pages, increasing proposal generation by 15%."
       ]
     },
     {

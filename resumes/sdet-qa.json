@@ -17,7 +17,7 @@
       "dates": "01/2026 - Present",
       "bullets": [
         "Architected automated end-to-end browser testing pipelines using Playwright and Python, reducing manual regression testing time by 70% across 5 client production deployments.",
-        "Implemented automated form-filling, bot detection evasion, and error boundary verification suites with 98% pass rate across parallel headless browser environments.",
+        "Implemented automated form-filling, dynamic session and resilience handling, and error boundary verification suites with 98% pass rate across parallel headless browser environments.",
         "Integrated automated test execution into GitHub Actions CI/CD workflows, catching 25+ critical bugs pre-release and cutting release cycle time by 30%.",
         "Created reusable regression test scripts and mock data fixtures for REST APIs, improving test coverage by 40% and cutting staging downtime."
       ]
@@ -73,7 +73,7 @@
       "stack": "Python, Playwright, pytest, GitHub Actions",
       "bullets": [
         "Built an autonomous end-to-end browser testing suite with Playwright and Python, automating multi-step form verification, file uploads, and DOM validation across complex SPAs.",
-        "Engineered intelligent retry logic, stealth evasion, and dynamic locator fallbacks that reduced automated test failure rates by 85% on dynamic web applications."
+        "Engineered intelligent retry logic, session resilience, and dynamic locator fallbacks that reduced automated test failure rates by 85% on dynamic web applications."
       ]
     },
     {

@@ -57,11 +57,13 @@ def resolve_greenhouse(apply_url: str) -> str:
         parsed = urllib.parse.urlparse(apply_url)
         path_parts = [p for p in parsed.path.split("/") if p]
         
-        # Check query string for gh_jid=
+        # Check query string for gh_jid= or embed/job_app?for={slug}&token={id}
         job_id = None
         qs = urllib.parse.parse_qs(parsed.query)
         if "gh_jid" in qs:
             job_id = qs["gh_jid"][0]
+        elif "token" in qs:
+            job_id = qs["token"][0]
         elif "jobs" in path_parts:
             idx = path_parts.index("jobs")
             if idx + 1 < len(path_parts):
@@ -69,7 +71,9 @@ def resolve_greenhouse(apply_url: str) -> str:
 
         # Determine company slug
         company_slug = None
-        if path_parts and path_parts[0] not in ("jobs", "embed"):
+        if "for" in qs:
+            company_slug = qs["for"][0]
+        elif path_parts and path_parts[0] not in ("jobs", "embed"):
             company_slug = path_parts[0]
 
         if not job_id:

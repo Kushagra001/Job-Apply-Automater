@@ -6,6 +6,7 @@ service_account*.json
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
 output/*.pdf
 output/*.json
+output/outreach/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

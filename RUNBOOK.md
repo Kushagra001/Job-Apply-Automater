@@ -36,7 +36,7 @@ ATS systems (Greenhouse, Lever, etc.) occasionally update their HTML structure, 
 
 If the pipeline fails with a Groq API `404` or `Model Not Found` error, the LLM model we are using has likely been deprecated.
 
-1. Go to the [Groq Models Documentation](https://console.groq.com/docs/models) to find a currently supported model name (e.g., `llama-3.3-70b-versatile`).
+1. Go to the [Groq Models Documentation](https://console.groq.com/docs/models) or run `python scripts/run_pipeline.py --doctor` to verify currently supported active models (e.g., `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`). Note: `llama-3.3-70b-versatile`, `groq/compound`, and `groq/compound-mini` are deprecated/retired.
 2. Open your GitHub Repository.
 3. Go to **Settings > Secrets and variables > Actions > Variables**.
 4. Create or update a Repository Variable named `GROQ_MODEL` and set its value to the new model name.
@@ -48,3 +48,10 @@ If the pipeline processes a massive burst of jobs, `gspread` might hit Google Sh
 
 - Check your Google Cloud Platform Console for the `Google Sheets API` quota.
 - Consider batching writes (this would require modifying `log_and_notify.py` to use `sheet.append_rows(list_of_rows)` instead of appending row-by-row).
+
+## 5. Callback Conversion Controls & Cold Outreach Review
+
+- **Remote-Only / Remote-First Optimization:** Production CI sets `REMOTE_ONLY=true` and `REMOTE_FOCUS=true` so only verified remote roles accessible from India (India Remote / Worldwide EOR with zero visa barrier) are queued. Override via GitHub Actions `workflow_dispatch` `remote_only` input or `--remote-only` CLI flag.
+- **Freshness & Cooldowns:** `MAX_JOB_AGE_DAYS` (default `14`) filters out stale ghost listings; `COOLDOWN_DAYS_PER_COMPANY` (default `14`) and `MAX_APPLICATIONS_PER_COMPANY_30D` (default `2`) prevent spamming multiple roles at one company.
+- **Strict Scoring Gate:** Both `SCORE_TAILOR_THRESHOLD` and `SCORE_VOLUME_FLOOR` default to `65` per `AGENTS.md`. Do not lower `SCORE_VOLUME_FLOOR` below `65`.
+- **Cold Outreach Drafts (`scripts/outreach.py`):** For high-scoring applications (`score >= 72`, `hackernews`, or `yc_startups`), `outreach.py` generates a concise proof-of-work email + tailored PDF attachment bundle under `output/outreach/` and, when `GMAIL_USER` and `GMAIL_APP_PASSWORD` are configured in GitHub Actions secrets, saves it directly to Gmail **`Drafts`** (`[Gmail]/Drafts`) — never auto-sent. Review and click **Send** manually in Gmail or via your Telegram digest prompt.

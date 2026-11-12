@@ -5,15 +5,16 @@ from pathlib import Path
 from scripts.render_pdf import render_pdf, OUTPUT_DIR
 
 
-def test_render_pdf_strict_one_page_compression(tmp_path):
+def test_render_pdf_strict_one_page_compression(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.render_pdf.OUTPUT_DIR", tmp_path)
     # Load base resume and inflate it with additional long experience bullets
-    base_resume = json.loads(Path("resumes/backend-node.json").read_text())
+    base_resume = json.loads(Path("resumes/backend-node.json").read_text(encoding="utf-8"))
     inflated_resume = json.loads(json.dumps(base_resume))
 
     # Add extra projects to force overflow beyond 1 page
     extra_project = {
         "name": "Distributed Realtime Cache Infrastructure",
-        "technologies": ["Node.js", "Redis", "Docker", "TypeScript", "gRPC"],
+        "stack": "Node.js, Redis, Docker, TypeScript, gRPC",
         "bullets": [
             "Architected high-throughput distributed memory caching service achieving sub-5ms p99 latency across 100,000 concurrent websocket connections.",
             "Designed master-replica failover mechanism with automated health checks reducing downtime to under 0.01% in production.",
@@ -24,6 +25,7 @@ def test_render_pdf_strict_one_page_compression(tmp_path):
     inflated_resume["projects"].append(extra_project)
 
     pdf_path = render_pdf(inflated_resume, company="TestCompressCo")
+    assert Path(pdf_path).parent == tmp_path
     reader = pypdf.PdfReader(pdf_path)
 
     # Must be compressed to strictly 1 page

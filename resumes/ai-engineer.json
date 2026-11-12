@@ -81,13 +81,7 @@
       "name": "Automated Job Application Pipeline",
       "stack": "Python, Groq, Playwright, GitHub Actions, Google Sheets",
       "bullets": [
-        "Architected an agentic pipeline that discovers job listings, scores them against multiple resume variants using Groq (Llama 3.3 70B), and auto-tailors resume content per listing, reducing manual effort by 60%."
-      ]
-    },
-    {
-      "name": "Automated Job Application Pipeline",
-      "stack": "Python, Groq, Playwright, GitHub Actions, Google Sheets",
-      "bullets": [
+        "Architected an agentic pipeline that discovers job listings, scores them against multiple resume variants using Groq (Llama 3.3 70B), and auto-tailors resume content per listing, reducing manual effort by 60%.",
         "Built a multi-source discovery layer combining free job-board APIs and Playwright-based scraping, with fail-soft error handling so one broken source doesn't block the run, increasing data coverage by 30%.",
         "Orchestrated the full pipeline on GitHub Actions with scheduled runs and Google Sheets logging for auditability, improving auditability by 25%."
       ]
@@ -96,13 +90,7 @@
       "name": "Stackform Cold Outreach Pipeline",
       "stack": "Python, Firecrawl, Groq, Google Sheets",
       "bullets": [
-        "Built an agentic outreach pipeline that scrapes prospect websites, scores site staleness (0-100), and drafts personalized outreach emails using Groq, increasing email open rates by 40%."
-      ]
-    },
-    {
-      "name": "Stackform Cold Outreach Pipeline",
-      "stack": "Python, Firecrawl, Groq, Google Sheets",
-      "bullets": [
+        "Built an agentic outreach pipeline that scrapes prospect websites, scores site staleness (0-100), and drafts personalized outreach emails using Groq, increasing email open rates by 40%.",
         "Designed a resilient scraping layer with Firecrawl as the primary source and a DuckDuckGo/BeautifulSoup fallback for reliability, improving scraping reliability by 20%.",
         "Used Google Sheets as a lightweight CRM with region-aware pricing logic (INR/USD) built into the outreach flow, reducing pricing errors by 15%."
       ]

@@ -10,6 +10,16 @@ on:
         required: false
         default: 'true'
         type: boolean
+      max_jobs:
+        description: 'Override MAX_JOBS_PER_RUN for this manual trigger'
+        required: false
+        default: '25'
+        type: string
+      remote_only:
+        description: 'Only apply to remote roles (recommended: true)'
+        required: false
+        default: 'true'
+        type: boolean
 
 # Fix #13: prevent overlapping runs when a previous run takes longer than 6 hours.
 # cancel-in-progress: false so a late-running job is not killed mid-application.
@@ -40,18 +50,38 @@ jobs:
       - name: Run Pipeline
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           # Fix #9: Telegram secrets wired up so notify_telegram() fires in production
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAX_JOBS_PER_RUN: ${{ github.event.inputs.max_jobs || vars.MAX_JOBS_PER_RUN || '25' }}
+          REMOTE_ONLY: ${{ github.event.inputs.remote_only || vars.REMOTE_ONLY || 'true' }}
+          REMOTE_FOCUS: ${{ vars.REMOTE_FOCUS || 'true' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: python scripts/run_pipeline.py
 
-      - name: Upload Generated Resumes
+      - name: Track Email Replies
+        if: always()
+        continue-on-error: true
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python scripts/track_applications.py --days 7
+
+      - name: Upload Generated Resumes & Outreach Drafts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tailored-resumes
-          path: output/*.pdf
+          path: |
+            output/*.pdf
+            output/outreach/*.json
           retention-days: 30

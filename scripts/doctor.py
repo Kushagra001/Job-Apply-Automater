@@ -86,6 +86,11 @@ def _check_env_vars() -> list[CheckResult]:
     else:
         results.append(CheckResult("Env: Gmail Feedback", "WARN", "Not configured (feedback listener disabled)"))
 
+    # 5. Remote Targeting mode
+    remote_only = os.environ.get("REMOTE_ONLY", "false").strip()
+    remote_focus = os.environ.get("REMOTE_FOCUS", "true").strip()
+    results.append(CheckResult("Env: Remote Targeting", "OK", f"REMOTE_ONLY={remote_only}, REMOTE_FOCUS={remote_focus}"))
+
     return results
 
 
@@ -107,11 +112,17 @@ def _check_groq_api() -> CheckResult:
             try:
                 resp = client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": "Ping. Respond with 'PONG'."}],
-                    max_tokens=5,
+                    messages=[{"role": "user", "content": "Ping. Respond with PONG only."}],
+                    max_tokens=256,
                 )
                 elapsed = (time.perf_counter() - start) * 1000
-                reply = resp.choices[0].message.content.strip().encode("ascii", "replace").decode("ascii")
+                raw_reply = resp.choices[0].message.content or ""
+                import re
+                raw_reply = re.sub(r"<think>[\s\S]*?</think>", "", raw_reply, flags=re.IGNORECASE).strip()
+                reply = raw_reply.encode("ascii", "replace").decode("ascii")
+                if not reply:
+                    last_err = RuntimeError(f"Model '{model}' returned empty content")
+                    continue
                 return CheckResult("Groq Inference API", "OK", f"Model '{model}' replied: '{reply}'", elapsed)
             except Exception as e:
                 last_err = e
@@ -217,8 +228,11 @@ def _check_sourcing_endpoints() -> list[CheckResult]:
         ("Ashby API", "https://api.ashbyhq.com", {"User-Agent": "Mozilla/5.0"}),
         ("Remotive API", "https://remotive.com/api/remote-jobs?limit=1", {"User-Agent": "Mozilla/5.0"}),
         ("RemoteOK API", "https://remoteok.com/api", {"User-Agent": "Mozilla/5.0"}),
-        ("HackerNews Firebase", "https://hacker-news.firebaseio.com/v0/maxitem.json", {"User-Agent": "Mozilla/5.0"}),
-        ("SimplifyJobs New Grad", "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md", {"User-Agent": "Mozilla/5.0"}),
+        ("Jobicy API", "https://jobicy.com/api/v2/remote-jobs?count=1", {"User-Agent": "Mozilla/5.0"}),
+        ("Arbeitnow API", "https://www.arbeitnow.com/api/job-board-api", {"User-Agent": "Mozilla/5.0"}),
+        ("Himalayas API", "https://himalayas.app/jobs/api?offset=0", {"User-Agent": "Mozilla/5.0"}),
+        ("HackerNews Algolia", "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=1", {"User-Agent": "Mozilla/5.0"}),
+        ("SimplifyJobs New Grad", "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json", {"User-Agent": "Mozilla/5.0"}),
         ("Jina Reader Engine", "https://r.jina.ai/https://example.com", {"User-Agent": "Mozilla/5.0", "Accept": "text/plain"}),
     ]
 

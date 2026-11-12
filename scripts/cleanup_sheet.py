@@ -38,9 +38,16 @@ STATUS_PRIORITY = {
     "dry_run_success": 7,
     "application_received": 6,
     "rejection": 5,
+    "requires_captcha": 4,
     "apply_failed": 3,
+    "apply_error": 3,
     "skipped_low_score": 2,
+    "skipped_senior_role": 1,
     "skipped_unsupported_ats": 1,
+    "skipped_unsupported": 1,
+    "skipped_geo_knockout": 1,
+    "skipped_company_cooldown": 1,
+    "job_closed": 1,
     "render_error": 0,
 }
 

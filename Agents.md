@@ -8,27 +8,29 @@ risk account restriction. Naukri listing discovery (scrape-only, no login/apply)
 
 Owner: Kushagra Singh Negi. Also runs Stackform (freelance dev agency) and BidCopy (AI bid
 proposal SaaS) — this project reuses the same pattern as his cold-outreach pipeline: Groq
-(Llama 3.3 70B, free tier) for LLM steps, Google Sheets as the datastore/CRM, Playwright for
+(`openai/gpt-oss-20b` / `qwen/qwen3.8-27b`, free tier) for LLM steps, Google Sheets as the datastore/CRM, Playwright for
 browser automation.
 
 ---
 
-## Current state (last updated: 2026-08-22)
+## Current state (last updated: 2026-11-12)
 
-> **Status:** 🟡 In Progress — scaffolding phase. No scripts written yet. Repo is local-only.
+> **Status:** 🟢 Conversion-calibrated — Freshness & geo/work-auth filtering, strict `>= 65` scoring gate, honest resume alignment, company cooldowns, geo-safe ATS autofill, and cold outreach drafting (`scripts/outreach.py`) implemented and unit-tested.
 
 | Stage | Script / Asset | Status |
 |---|---|---|
 | Repo scaffold | directory tree + stubs | ✅ Done — 2026-08-22 |
-| Resume data | `resumes/*.json` | ✅ Done — 2026-08-23 |
-| Discovery | `scripts/fetch_jds.py` | ✅ Done — 2026-08-29 |
-| Scoring | `scripts/score_and_pick.py` | ✅ Done — 2026-08-29 |
-| Tailoring | `scripts/tailor_resume.py` | ✅ Done — 2026-08-29 |
-| PDF render | `scripts/render_pdf.py` | ✅ Done — 2026-08-29 |
-| Logging | `scripts/log_and_notify.py` | ✅ Done — 2026-08-29 |
-| ATS apply | `scripts/auto_apply_ats.py` | ✅ Done — 2026-08-29 |
-| CI/CD | `.github/workflows/pipeline.yml` | ❌ Not started |
-| Hardening | deduplication, retry, dry-run, tests | ❌ Not started |
+| Resume data | `resumes/*.json` (6 variants) | ✅ Done — 2026-11-12 |
+| Discovery | `scripts/fetch_jds.py` | ✅ Done — 2026-11-12 |
+| Enrichment & Doctor | `scripts/enrich_jd.py`, `scripts/doctor.py` | ✅ Done — 2026-09-21 |
+| Scoring | `scripts/score_and_pick.py` | ✅ Done — 2026-11-12 |
+| Tailoring | `scripts/tailor_resume.py` | ✅ Done — 2026-11-12 |
+| PDF render | `scripts/render_pdf.py` | ✅ Done — 2026-11-12 |
+| Logging & Status Track | `scripts/log_and_notify.py`, `scripts/track_applications.py` | ✅ Done — 2026-11-12 |
+| Cold Outreach Drafts | `scripts/outreach.py` | ✅ Done — 2026-11-12 |
+| ATS apply | `scripts/auto_apply_ats.py` | ✅ Done — 2026-11-12 |
+| Orchestrator & CI/CD | `scripts/run_pipeline.py`, `.github/workflows/pipeline.yml` | ✅ Done — 2026-11-12 |
+| Hardening | deduplication, cooldowns, retry, dry-run, sheet cleaner, regression tests | ✅ Done — 2026-11-12 |
 
 ---
 
@@ -52,19 +54,30 @@ browser automation.
 ## Repo structure
 ```
 job-pipeline/
-├── .github/workflows/pipeline.yml   # cron schedule + manual trigger
+├── .github/workflows/pipeline.yml   # cron schedule + manual trigger + email tracking
 ├── resumes/
 │   ├── frontend.json                # base resume variant — frontend-focused
 │   ├── backend-python.json          # base resume variant — Python/Django backend
 │   ├── backend-node.json            # base resume variant — Node.js backend
-│   └── ai-engineer.json             # base resume variant — AI/ML engineering
+│   ├── ai-engineer.json             # base resume variant — AI/ML engineering
+│   ├── sdet-qa.json                 # base resume variant — QA/SDET automation
+│   └── solutions-support.json       # base resume variant — Solutions/Technical Support
+├── templates/
+│   └── resume.html                  # Jinja2 HTML template for Playwright PDF render
 ├── scripts/
-│   ├── fetch_jds.py                 # discovery: APIs + scrapers, normalizes to JD schema
-│   ├── score_and_pick.py            # Groq: score JD against each resume variant, pick best
-│   ├── tailor_resume.py             # Groq: re-weight bullets within the chosen variant
-│   ├── render_pdf.py                # fills the fixed template with tailored JSON
-│   ├── auto_apply_ats.py            # Playwright — Greenhouse/Lever/Ashby only
-│   └── log_and_notify.py            # Sheets append + Telegram/email ping
+│   ├── run_pipeline.py              # CLI orchestrator, tiered threshold routing, circuit breaker
+│   ├── fetch_jds.py                 # discovery: ATS APIs + aggregators, geo/seniority filters
+│   ├── enrich_jd.py                 # fills sparse JDs via ATS APIs or Jina Reader
+│   ├── doctor.py                    # pre-flight health checks (--doctor)
+│   ├── score_and_pick.py            # Groq (with keyword heuristic fallback) scoring
+│   ├── tailor_resume.py             # Groq: re-weight bullets within chosen variant
+│   ├── render_pdf.py                # Playwright/Chromium HTML->PDF (1-page compressed)
+│   ├── auto_apply_ats.py            # Playwright — Greenhouse/Lever/Ashby (+ aggregator redirects)
+│   ├── outreach.py                  # Cold founder/recruiter outreach drafts ([Gmail]/Drafts + artifacts)
+│   ├── log_and_notify.py            # Sheets append, company cooldowns + Telegram digest & captcha alerts
+│   ├── track_applications.py        # Gmail IMAP tracker -> Sheets status & Telegram alerts
+│   └── cleanup_sheet.py             # Google Sheets sanitization & deduplication tool
+├── tests/                           # pytest suite (70+ unit/regression tests)
 └── requirements.txt
 ```
 
@@ -81,7 +94,7 @@ job-pipeline/
   "remote": true,
   "description": "string",
   "apply_url": "string",
-  "source": "remoteok | remotive | hackernews | greenhouse | lever | ashby",
+  "source": "remoteok | remotive | jobicy | arbeitnow | himalayas | simplify | yc_startups | hackernews | greenhouse | lever | ashby",
   "fetched_at": "ISO8601"
 }
 ```
@@ -89,7 +102,7 @@ job-pipeline/
 **Resume variant schema** (`resumes/*.json`) — structured, not prose:
 ```json
 {
-  "variant": "frontend | backend-python | backend-node | ai-engineer",
+  "variant": "frontend | backend-python | backend-node | ai-engineer | sdet-qa | solutions-support",
   "summary": "string",
   "experience": [
     { "company": "string", "role": "string", "dates": "string", "bullets": ["string", "..."] }
@@ -109,22 +122,23 @@ copying real bullets from the source resume and re-weighting emphasis — never 
 ```json
 {
   "jd_id": "string",
-  "best_variant": "frontend | backend-python | backend-node | ai-engineer",
+  "best_variant": "frontend | backend-python | backend-node | ai-engineer | sdet-qa | solutions-support",
   "score": 0-100,
   "missing_skills": ["string", "..."],
   "reasoning": "string"
 }
 ```
-Threshold for proceeding to tailoring: score >= 65 (tune based on observed interview conversion,
-not application volume).
+Threshold policy: `score_and_pick.py` marks `status="skipped"` below `SCORE_THRESHOLD = 65`.
+`run_pipeline.py` enforces the strict `>= 65` gate (`SCORE_TAILOR_THRESHOLD = 65`, `SCORE_VOLUME_FLOOR = 65`),
+enforces per-company cooldowns (`14d` / max `2` per 30 days), and triggers `outreach.py` drafts for qualifying high-fit roles.
 
 ---
 
 ## Environment
-- Python 3.11, `pip install -r requirements.txt`
+- Python 3.10+, `pip install -r requirements.txt`
 - Playwright: `playwright install chromium` after pip install
-- Secrets expected in env: `GROQ_API_KEY`, `GOOGLE_SA_JSON` (service account JSON, stringified)
-- Optional: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for run notifications
+- Secrets expected in env: `GROQ_API_KEY`, `GOOGLE_SA_JSON` (service account JSON, stringified), `GOOGLE_SHEET_ID`
+- Optional: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GROQ_MODEL`, `MAX_JOBS_PER_RUN`, `REMOTE_ONLY`, `REMOTE_FOCUS`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`
 
 ---
 
@@ -145,10 +159,10 @@ not application volume).
 ## Agent instructions (for AI coding assistants)
 
 ### General
-- Read this file AND `Progress.md` at the start of every session before writing any code.
+- Read this file, `Progress.md`, AND `STRATEGY_AND_FIXES.md` at the start of every session before writing any code or implementing any fix/strategy.
 - Do not start a new checkpoint if the previous one has unresolved blockers listed in `Progress.md`.
 - Ask before adding new third-party dependencies — prefer stdlib or already-listed packages.
-- After completing any checkpoint, update the status table above AND `Progress.md` immediately.
+- After completing any checkpoint or bug fix, update the status table above, `Progress.md`, AND `STRATEGY_AND_FIXES.md` immediately.
 
 ### Checkpoint build order (enforced)
 Build in this exact sequence — each stage depends on the one above it:
@@ -173,10 +187,10 @@ Build in this exact sequence — each stage depends on the one above it:
 - Normalize `remote` field to a boolean; strip HTML from `description`.
 
 #### `score_and_pick.py`
-- Use `groq` SDK with model `llama-3.3-70b-versatile`.
+- Use `groq` SDK with verified active fallback models (`openai/gpt-oss-20b` primary, `qwen/qwen3.8-27b` secondary).
 - Prompt must request structured JSON output matching the Score result schema — use
   `response_format={"type": "json_object"}` if supported, otherwise parse with `json.loads`.
-- Load all four resume variants and score the JD against each; return the best.
+- Load all resume variants and score the JD against each; return the best.
 - Hard gate: if `score < 65`, write a `status: "skipped"` row to Sheets and stop the pipeline
   for that JD.
 
@@ -190,9 +204,8 @@ Build in this exact sequence — each stage depends on the one above it:
   unchanged per role).
 
 #### `render_pdf.py`
-- Use `weasyprint` (HTML→PDF) or a Jinja2 → LaTeX → `pdflatex` pipeline — pick one and commit.
-- Template lives at `templates/resume.html` (or `.tex`). Do not inline style in the script.
-- Output path convention: `output/<company>_<variant>_<YYYYMMDD>.pdf`.
+- Uses Jinja2 (`templates/resume.html`) → Playwright/Chromium HTML→PDF with automatic single-page compression and `pypdf` text verification. Do not inline styles in the script.
+- Output path convention: `output/<sanitized_company>_<variant>_<YYYYMMDD>.pdf`.
 
 #### `log_and_notify.py`
 - Google Sheets: use `gspread` with a service account. Sheet ID stored in env var `GOOGLE_SHEET_ID`.
@@ -202,30 +215,29 @@ Build in this exact sequence — each stage depends on the one above it:
 - `log_failure(source, error)` must write to both Sheets (status=`error`) and stderr.
 
 #### `auto_apply_ats.py`
-- Entry point: `apply(jd: dict, pdf_path: str) -> bool`.
-- Detect ATS from `apply_url` domain: `greenhouse.io` → Greenhouse flow, `lever.co` → Lever
-  (e.g., `boards.greenhouse.io` → Greenhouse flow, `jobs.lever.co` → Lever
-  flow, `ashbyhq.com` → Ashby flow.
+- Entry point: `apply(jd: dict, pdf_path: str, dry_run: bool = False, cover_letter: str = "", use_persistent_profile: bool = False, zero_llm_mode: bool = False) -> tuple[bool, str]`.
+- Detect ATS from `apply_url` domain (`_ATS_DOMAIN_MAP` + `gh_jid=`):
+  - `boards.greenhouse.io` / `job-boards.greenhouse.io` / `job-boards.eu.greenhouse.io` / `embed/job_app?for=...&token=...` / `gh_jid=` → Greenhouse flow (supports `iframe#grnhse_iframe` and React `role="combobox"`)
+  - `jobs.lever.co` / `apply.lever.co` → Lever flow (with invisible hCaptcha challenge detection)
+  - `jobs.ashbyhq.com` → Ashby flow (SPA hydration wait + `#_systemfield_resume` + Yes/No toggles)
+  - Aggregator redirect wrappers (`remotive.com`, `remoteok.com`, `arbeitnow.*`, `jobicy.com`, `himalayas.app`) → resolve outbound redirect and ONLY apply if target lands on Greenhouse, Lever, or Ashby.
 - `--dry-run` flag: fill all fields but do NOT click the final submit button.
-- Every selector must have a timeout of 15 s; raise `ATSTimeoutError` on miss (caught by caller).
+- Every selector has a 20 s timeout (`SELECTOR_TIMEOUT_MS`); raises `ATSTimeoutError` on miss (caught by `apply()`).
 - Do not add new ATS platforms without updating the detection table in this section.
 
 ---
 
 ## Testing before merging changes
-- Run `fetch_jds.py` locally against real sources at least once after any change —
+- Run `pytest -v` after any changes (unit tests mock network/LLM calls).
+- Run `fetch_jds.py` locally against real sources at least once after scraper changes —
   APIs can break or change their schema.
-- Run `score_and_pick.py` against 2-3 saved fixture JDs (one per resume variant's ideal case) to
-  confirm variant selection still routes correctly.
+- Run `score_and_pick.py` against 2-3 saved fixture JDs to confirm variant selection still routes correctly.
 - Never test `auto_apply_ats.py` against a real company's live form unless intentionally
-  submitting an application — use a Greenhouse/Lever sandbox or a `--dry-run` flag that fills but
-  does not click submit.
+  submitting an application — use `--dry-run` or `tests/` mocks exclusively.
 
 ---
 
 ## Open items / explicitly deferred
 - LinkedIn/Naukri auto-apply: deferred indefinitely, would require a persistent-session VM
   (e.g. Oracle Cloud free tier) outside GitHub Actions — separate scope if revisited.
-- PDF template design: owner to supply preferred resume layout before `render_pdf.py` is built.
-- Google Sheet ID: owner must create the sheet and set `GOOGLE_SHEET_ID` secret before
-  `log_and_notify.py` can be tested end-to-end.
+- Score threshold calibration: review observed conversion rate between `SCORE_VOLUME_FLOOR = 20` / `SCORE_TAILOR_THRESHOLD = 55` in `run_pipeline.py` vs the stricter `>= 65` gate.

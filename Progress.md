@@ -1,6 +1,6 @@
 # Progress.md — job-pipeline
 
-> **Rule for agents:** Read `Agents.md` first, then this file. Do not start the next checkpoint
+> **Rule for agents:** Read `AGENTS.md`, `STRATEGY_AND_FIXES.md`, and this file first before implementing any fix or strategy. Do not start the next checkpoint
 > until all sub-tasks of the current one are ticked ✅ and no blockers remain.
 
 ---
@@ -150,21 +150,21 @@ _None yet._
 
 **Goal:** Convert a tailored resume JSON into a clean, ATS-compatible PDF using a fixed template.
 
-**Status:** ✅ Done — 2026-08-29
+**Status:** ✅ Done — 2026-09-21
 
 ### Sub-tasks
-- [x] Decide on rendering approach: `weasyprint` (HTML→PDF) vs. Jinja2+LaTeX — **owner to decide**
-- [x] Create `templates/resume.html` (or `.tex`) — owner to supply design/layout
-- [x] Implement `render(tailored_json, output_path)` function
+- [x] Decide on rendering approach: Playwright/Chromium HTML→PDF (switched from WeasyPrint for cross-platform compatibility)
+- [x] Create `templates/resume.html` — owner-supplied minimalist layout
+- [x] Implement `render_pdf(tailored_json, company, date)` function with single-page compression and filename sanitization
 - [x] Confirm output path convention: `output/<company>_<variant>_<YYYYMMDD>.pdf`
-- [x] Verify PDF is ATS-parseable (text layer present, no image-only export)
+- [x] Verify PDF is ATS-parseable (text layer present, verified via `pypdf`)
 - [x] Update `Agents.md` status table when done
 
 ### Blockers
 _Depends on Checkpoint 5 (tailor_resume.py) being complete._
 
 ### Decisions
-- Rendering Approach: HTML/CSS to PDF using `weasyprint`.
+- Rendering Approach: HTML/CSS to PDF using Playwright/Chromium + Jinja2 (replaced WeasyPrint).
 - Template Design: Minimalist single column, dark blue `#1e3a8a` accent color, designed in HTML.
 
 ---
@@ -186,8 +186,7 @@ send a Telegram ping. Must degrade gracefully when credentials are absent.
 - [x] Update `Agents.md` status table when done
 
 ### Blockers
-- 🚫 **Owner must create the Google Sheet** and set `GOOGLE_SHEET_ID` env var / secret.
-- 🚫 **Service account JSON** must be created and added as `GOOGLE_SA_JSON` secret.
+_None._
 
 ### Decisions
 _None yet._
@@ -199,8 +198,7 @@ _None yet._
 **Goal:** Playwright-driven ATS form filler for Greenhouse, Lever, and Ashby.
 Must support `--dry-run` (fill but do not submit).
 
-**Status:** ⬜ Not started
-**Status:** ✅ Done — 2026-08-29
+**Status:** ✅ Done — 2026-11-11
 
 ### Sub-tasks
 - [x] Implement `apply(jd, pdf_path, dry_run)` dispatcher logic
@@ -265,6 +263,10 @@ _None yet._
 | 2026-08-29 | Checkpoint 8 complete. Built Playwright automation for Greenhouse and Lever in `auto_apply_ats.py`. | Ready for Checkpoint 9 (CI/CD pipeline). |
 | 2026-08-29 | Checkpoint 9 complete. CI/CD Pipeline implemented. | Ready for Checkpoint 10. |
 | 2026-08-29 | Checkpoint 10 complete. Hardening applied (Deduplication, Retries, Tests, Runbook). | Pipeline is production-ready. |
+| 2026-09-21 | Added `enrich_jd.py`, `doctor.py`, `track_applications.py`, `cleanup_sheet.py`, and Playwright PDF compression. | Phase 1–4 upgrades complete. |
+| 2026-11-11 | Critical & medium-priority hardening audit/fixes across `resumes/*.json`, `render_pdf.py`, `score_and_pick.py`, `tailor_resume.py`, `log_and_notify.py`, `auto_apply_ats.py`, `run_pipeline.py`, `fetch_jds.py`, `track_applications.py`, `doctor.py`, and `.github/workflows/pipeline.yml`. | All checks and regression tests passing. |
+| 2026-11-12 | Callback conversion overhaul (Phases 1–4): 14-day freshness filter + India/global-remote board rebalancing (`fetch_jds.py`), geo/clearance/ERP knockout gates + strict `>= 65` scoring threshold (`score_and_pick.py`, `run_pipeline.py`), matched skill prioritization + honest resume proof-of-work + PDF font spacing fix (`tailor_resume.py`, `resumes/backend-*.json`, `templates/resume.html`), geo-safe ATS authorization/salary QA (`auto_apply_ats.py`), per-company 14d cooldowns (`log_and_notify.py`), and Gmail IMAP `[Gmail]/Drafts` cold outreach generator (`scripts/outreach.py`). | Implemented and unit-tested. |
+| 2026-11-12 (PM) | Remote-first optimization & full bug-fix sweep: created `STRATEGY_AND_FIXES.md`; wired active Groq models (`openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`), 404 non-retry, `<think>` stripping, `max_tokens=256` doctor ping, and grounded `cover_letter` fallback; added `REMOTE_ONLY=true` CI workflow + `--remote-only` CLI flag + `-10` non-remote score calibration (`REMOTE_FOCUS=true`); normalized custom Greenhouse corporate URLs to `embed/job_app?for={slug}&token={id}`; added React `role="combobox"` + `[id*=...]` handling, Ashby SPA hydration + `#_systemfield_resume`, and Lever hCaptcha handling (`auto_apply_ats.py`); hardened Arbeitnow ccTLD filter, sentence-scoped geo-knockout check, asset-email exclusion, aggregator href inspection, and tracker sender-priority ordering. | All 109 unit/regression tests passing; `--doctor` healthy. |
 
 ---
 
