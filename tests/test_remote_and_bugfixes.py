@@ -379,3 +379,94 @@ def test_tracker_sender_priority_and_status_updates(monkeypatch):
     log_mod.log_result(jd={"company": "RenderFailCo", "title": "SDE", "source": "hn", "apply_url": "https://x"}, score=80, variant_used="frontend", status="render_error")
     assert len(log_mod._DIGEST_BUFFER["failed"]) == 1
 
+
+# ── Remote Yield Expansion & Direct-ATS Prioritization ───────────────────────
+
+def test_apac_segment_location_and_ats_metadata_expansion(monkeypatch):
+    # Broad APAC & multi-region remote strings pass; APAC sub-country locks & excluded India fail
+    assert fj.is_location_ok("APAC", True) is True
+    assert fj.is_location_ok("Remote - NA, APAC, EMEA", True) is True
+    assert fj.is_location_ok("APAC, EMEA, LATAM, Canada", True) is True
+    assert fj.is_location_ok("APAC; Singapore, Central, Singapore", True) is False
+    assert fj.is_location_ok("Singapore, APAC", True) is False
+    assert fj.is_location_ok("EMEA, LATAM, Canada, UK", True) is False
+    assert fj.is_location_ok("Remote (Worldwide excluding India)", True) is False
+
+    # Lever workplaceType='remote' + allLocations fallback
+    lever_resp = MagicMock()
+    lever_resp.status_code = 200
+    lever_resp.json.return_value = [
+        {
+            "text": "Platform Security Engineer",
+            "workplaceType": "remote",
+            "categories": {"location": "San Francisco, CA", "allLocations": ["San Francisco, CA", "Remote - Global"]},
+            "applyUrl": "https://jobs.lever.co/fly/12345678-1234-1234-1234-123456789012/apply",
+            "descriptionBody": "Distributed infra.",
+        },
+        {
+            "text": "Onsite Office Engineer",
+            "workplaceType": "onsite",
+            "categories": {"location": "San Francisco, CA", "allLocations": ["San Francisco, CA"]},
+            "applyUrl": "https://jobs.lever.co/fly/22345678-1234-1234-1234-123456789012/apply",
+            "descriptionBody": "US onsite only.",
+        },
+    ]
+    monkeypatch.setattr("requests.get", lambda *a, **kw: lever_resp)
+    lv_jobs = fj._fetch_single_lever("fly")
+    assert len(lv_jobs) == 1
+    assert lv_jobs[0]["remote"] is True
+    assert lv_jobs[0]["location"] == "Remote - Global"
+
+    # Ashby secondaryLocations promotion keeps Render Canada locked while allowing Remote India
+    ashby_resp = MagicMock()
+    ashby_resp.status_code = 200
+    ashby_resp.json.return_value = {
+        "jobs": [
+            {
+                "title": "Backend Engineer",
+                "isListed": True,
+                "isRemote": False,
+                "location": "London HQ",
+                "secondaryLocations": [{"location": "Remote, India"}],
+                "applyUrl": "https://jobs.ashbyhq.com/secfix/12345678-1234-1234-1234-123456789012",
+                "descriptionHtml": "<p>Python APIs</p>",
+            },
+            {
+                "title": "Compute Engineer",
+                "isListed": True,
+                "isRemote": True,
+                "location": "Remote: United States",
+                "secondaryLocations": [{"location": "Remote: Canada"}],
+                "applyUrl": "https://jobs.ashbyhq.com/render/22345678-1234-1234-1234-123456789012",
+                "descriptionHtml": "<p>Rust</p>",
+            },
+        ]
+    }
+    monkeypatch.setattr("requests.get", lambda *a, **kw: ashby_resp)
+    ab_jobs = fj._fetch_single_ashby("secfix")
+    assert len(ab_jobs) == 1
+    assert ab_jobs[0]["location"] == "Remote, India"
+
+
+def test_direct_ats_ordered_before_aggregators_and_spam_filtered(monkeypatch):
+    # Direct ATS URLs must precede aggregator pages inside remote tier
+    monkeypatch.setattr("scripts.fetch_jds.fetch_ashby", lambda: [
+        {"title": "Full-Stack Engineer", "company": "Firstwork", "remote": True, "location": "India", "apply_url": "https://jobs.ashbyhq.com/firstwork/12345678-1234-1234-1234-123456789012", "source": "ashby", "posted_at": ""},
+    ])
+    monkeypatch.setattr("scripts.fetch_jds.fetch_himalayas", lambda: [
+        {"title": "Python Dev", "company": "Hivex", "remote": True, "location": "Worldwide", "apply_url": "https://himalayas.app/companies/hivex/jobs/python-dev", "source": "himalayas", "posted_at": ""},
+    ])
+    for fn_name in ("fetch_lever", "fetch_greenhouse", "fetch_remoteok", "fetch_remotive", "fetch_jobicy", "fetch_arbeitnow", "fetch_hackernews", "fetch_simplify_jobs", "fetch_yc_jobs"):
+        monkeypatch.setattr(f"scripts.fetch_jds.{fn_name}", lambda: [])
+    monkeypatch.setattr("scripts.log_and_notify.get_processed_urls", lambda: set())
+
+    ordered = fj.fetch_all()
+    assert [j["company"] for j in ordered] == ["Firstwork", "Hivex"]
+
+    # Spam/annotation marketplaces excluded on aggregators
+    assert fj._is_excluded_spam_listing("micro1", "Software Engineer - Backend") is True
+    assert fj._is_excluded_spam_listing("TELUS Digital", "Full-Stack AI Logic Expert") is True
+    assert fj._is_excluded_spam_listing("G2i Inc.", "Backend Developer - G2i Talent Pool") is True
+    assert fj._is_excluded_spam_listing("Firstwork", "Forward Deployed Engineer") is False
+
+

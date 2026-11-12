@@ -81,6 +81,8 @@ GREENHOUSE_COMPANIES = [
     "gitlab", "canonical", "cloudflare", "postman", "vercel", "airtable",
     "elastic", "grafanalabs", "planetscale", "intercom", "descript",
     "typeform", "mixpanel", "amplitude", "dbt-labs", "hashicorp",
+    "chainguard", "automattic", "remote", "springboard", "xohealth",
+    "valtech", "yipitdata", "bloomreach", "smartsheet", "togetherai", "enveritas",
     # Verified India tech / engineering hubs on Greenhouse
     "rubrik", "databricks", "fivetran", "druva", "commerceiq", "zscaler",
     "coinbase", "inmobi", "groww", "twilio", "datadog", "mongodb",
@@ -91,9 +93,11 @@ GREENHOUSE_COMPANIES = [
 ]
 
 ASHBY_COMPANIES = [
-    # Verified active Ashby boards (AI / modern devtools / global remote)
+    # Verified active Ashby boards (AI / modern devtools / India-remote & global remote)
     "posthog", "supabase", "railway", "airbyte", "render",
     "livekit", "triggerdev", "elevenlabs", "perplexity",
+    "secfix", "firstwork", "freehand", "phantom", "prefect",
+    "aiprise", "buildai", "interviewkickstart", "opendoctor", "runpod",
     "linear", "ramp", "clerk", "notion", "sentry",
     "temporal", "neon", "weaviate", "pinecone", "langchain",
     "llamaindex", "cohere", "huggingface", "grafana-labs",
@@ -102,8 +106,8 @@ ASHBY_COMPANIES = [
 ]
 
 LEVER_COMPANIES = [
-    # Verified active Lever boards (India SaaS/product + global tech)
-    "fampay", "hevodata", "cred", "meesho", "paytm", "binance", "spotify",
+    # Verified active Lever boards (India SaaS/product + global remote tech)
+    "fly", "fampay", "hevodata", "cred", "meesho", "paytm", "binance", "spotify",
 ]
 
 YC_COMPANIES = [
@@ -240,7 +244,6 @@ EXCLUDED_GEO_KEYWORDS: tuple[str, ...] = (
     "remote - canada", "remote (canada)", "remote, canada",
     "remote - uk", "remote (uk)", "remote, uk",
     "remote - europe", "remote (europe)", "remote, europe",
-    "north america", "amer", "americas", "emea", "latam", "apac only",
     "uk only", "canada only", "europe only", "germany only",
     "us timezone", "americas timezone", "european timezone",
     "any state", "within the us", "within the united states",
@@ -259,7 +262,7 @@ EXCLUDED_COUNTRY_RESTRICTED: frozenset[str] = frozenset([
     "germany", "deutschland", "france", "australia", "netherlands",
     "brazil", "poland", "spain", "singapore", "mexico", "czechia", "czech republic",
     "hungary", "ukraine", "malaysia", "argentina", "europe", "eu", "emea", "latam",
-    "amer", "americas", "north america", "south america", "central america", "apac",
+    "amer", "americas", "north america", "south america", "central america",
     "mena", "middle east", "africa", "caribbean", "southeast asia", "east asia",
     "scandinavia", "nordics", "benelux", "dach", "anz", "oceania",
     "ireland", "italy", "portugal", "sweden", "norway", "denmark", "finland",
@@ -286,6 +289,17 @@ EXCLUDED_COUNTRY_RESTRICTED: frozenset[str] = frozenset([
 _EXCLUDED_COUNTRY_PATTERNS: list[re.Pattern] = [
     _compile_token_pattern(kw) for kw in EXCLUDED_COUNTRY_RESTRICTED
 ]
+# Sub-countries/cities within APAC that lock out India when attached to "APAC" (e.g. "APAC; Singapore")
+_APAC_SUBCOUNTRY_LOCKS: tuple[re.Pattern, ...] = tuple(
+    _compile_token_pattern(kw) for kw in (
+        "singapore", "australia", "new zealand", "japan", "tokyo", "south korea", "seoul",
+        "taiwan", "hong kong", "china", "philippines", "manila", "malaysia", "indonesia",
+        "jakarta", "vietnam", "thailand", "bangkok", "sydney", "melbourne", "auckland",
+        "pakistan", "bangladesh", "sri lanka", "nepal", "anz",
+    )
+)
+_EXCLUDE_INDIA_RE = re.compile(r"\b(?:exclud(?:e|es|ing)|except|not)\s+(?:in\s+)?india\b", re.IGNORECASE)
+_APAC_TOKEN_RE = re.compile(r"\b(?:apac|asia[\s-]+pacific)\b", re.IGNORECASE)
 # Case-sensitive uppercase 2-letter US state suffixes (e.g. "Fort Wayne, IN", "Austin, TX")
 _US_STATE_COMMA_RE = re.compile(
     r",\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b"
@@ -356,10 +370,14 @@ def is_location_ok(location: str, remote: bool) -> bool:
     """
     Return True if the job is accessible to an India-based applicant:
     - Located in India (office, hybrid, or remote), OR
-    - Remote WITHOUT restrictive foreign geo-fencing (e.g. US/EU/AMER/EMEA only).
+    - Remote WITHOUT restrictive foreign geo-fencing (allows broad Global / Worldwide / APAC
+      remote regions unless locked to another specific APAC country like Singapore/Australia).
     """
     raw_loc = (location or "").strip()
     loc = raw_loc.lower()
+
+    if _EXCLUDE_INDIA_RE.search(raw_loc):
+        return False
 
     # Explicit India location is always OK (word-boundary safe; excludes Indiana / Indianapolis / IN)
     if any(p.search(loc) for p in _INDIA_PATTERNS):
@@ -372,12 +390,24 @@ def is_location_ok(location: str, remote: bool) -> bool:
     # Normalize punctuation like "U.S." -> "us", "U.K." -> "uk"
     loc_nodots = loc.replace(".", "")
 
-    # Check explicit foreign restriction phrases, US state suffixes, and foreign countries/hubs
+    # Check explicit foreign restriction phrases, US state suffixes, and foreign timezones
     if any(kw in loc or kw in loc_nodots for kw in EXCLUDED_GEO_KEYWORDS):
         return False
 
     if _US_STATE_COMMA_RE.search(raw_loc) or _FOREIGN_TZ_RE.search(raw_loc):
         return False
+
+    # Segment-aware evaluation for multi-region remote strings (e.g., "APAC, EMEA, LATAM, Canada" or "Remote - NA, APAC, EMEA")
+    has_apac_subcountry_lock = any(p.search(loc) or p.search(loc_nodots) for p in _APAC_SUBCOUNTRY_LOCKS)
+    segments = [seg.strip() for seg in re.split(r"[,;/|•]+", raw_loc) if seg.strip()]
+    for seg in segments:
+        seg_low = seg.lower()
+        seg_nodots = seg_low.replace(".", "")
+        if _APAC_TOKEN_RE.search(seg_low) and not has_apac_subcountry_lock:
+            return True
+        if any(kw in seg_low for kw in ("worldwide", "anywhere", "global", "wfa", "all countries")):
+            if not any(p.search(seg_low) or p.search(seg_nodots) for p in _EXCLUDED_COUNTRY_PATTERNS):
+                return True
 
     if any(p.search(loc) or p.search(loc_nodots) for p in _EXCLUDED_COUNTRY_PATTERNS):
         return False
@@ -606,10 +636,42 @@ def _report_source_failure(source: str, exc: Exception) -> None:
         logger.error("fetch:%s — error: %s", source, exc)
 
 
-def _is_remote(location: str) -> bool:
-    """Heuristic: treat 'remote', blank, 'worldwide', 'anywhere' as remote=True."""
+def _is_remote(location: str, title: str = "") -> bool:
+    """Heuristic: treat 'remote', blank, 'worldwide', 'anywhere', 'apac', or remote titles as remote=True."""
     loc = (location or "").lower().strip()
-    return loc in ("", "remote", "worldwide", "anywhere", "global") or "remote" in loc
+    if (
+        loc in ("", "remote", "worldwide", "anywhere", "global", "distributed", "wfa", "work from anywhere")
+        or any(tok in loc for tok in ("remote", "worldwide", "anywhere", "work from anywhere", "distributed"))
+        or bool(_APAC_TOKEN_RE.search(loc))
+    ):
+        return True
+    if title and re.search(r"\bremote\b", title, re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_direct_ats_url(apply_url: str) -> bool:
+    """Return True for direct hosted ATS application URLs (no Cloudflare aggregator hop)."""
+    u = (apply_url or "").lower()
+    return any(tok in u for tok in ("greenhouse.io", "lever.co", "ashbyhq.com", "gh_jid="))
+
+
+_SPAM_MARKETPLACE_COMPANIES = frozenset({
+    "micro1", "telus digital", "telus international", "imerit", "imerit technology",
+    "outlier", "outlier ai", "dataannotation", "alignerr", "remotasks", "scale ai", "g2i", "g2i inc.",
+})
+_SPAM_TITLE_PATTERNS = re.compile(
+    r"\b(?:talent\s+pool|ai\s+(?:trainer|community|tutor|content\s+reviewer)|annotation|video\s+annotation)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_excluded_spam_listing(company: str, title: str) -> bool:
+    """Reject known AI-training marketplaces & talent-pool aggregators."""
+    c_low = (company or "").strip().lower()
+    if c_low in _SPAM_MARKETPLACE_COMPANIES or any(c_low.startswith(s + " ") for s in ("micro1", "telus", "outlier", "imerit", "g2i")):
+        return True
+    return bool(_SPAM_TITLE_PATTERNS.search(title or ""))
 
 
 def _dedup(listings: list[dict]) -> list[dict]:
@@ -703,7 +765,7 @@ def _fetch_single_greenhouse(slug: str) -> list[dict]:
                 continue
             loc_data = job.get("location", {})
             location = loc_data.get("name", "") if isinstance(loc_data, dict) else str(loc_data)
-            remote = _is_remote(location)
+            remote = _is_remote(location, title)
             if not is_location_ok(location, remote):
                 continue
             apply_url = job.get("absolute_url", "")
@@ -771,11 +833,27 @@ def _fetch_single_ashby(slug: str) -> list[dict]:
             if _is_too_old(posted_at):
                 continue
             location = job.get("location", "") or ""
-            is_remote_flag = job.get("isRemote", False)
+            is_remote_flag = bool(job.get("isRemote", False))
             workplace_type = (job.get("workplaceType") or "").lower()
-            remote = is_remote_flag or "remote" in workplace_type or _is_remote(location)
+            remote = is_remote_flag or "remote" in workplace_type or _is_remote(location, title)
             if not is_location_ok(location, remote):
-                continue
+                sec_locs = [
+                    s.get("location", "")
+                    for s in (job.get("secondaryLocations") or [])
+                    if isinstance(s, dict) and s.get("location")
+                ]
+                matched_sec = next(
+                    (
+                        sl for sl in sec_locs
+                        if (_is_remote(sl) or any(p.search(sl.lower()) for p in _INDIA_PATTERNS))
+                        and is_location_ok(sl, _is_remote(sl) or is_remote_flag or "remote" in workplace_type)
+                    ),
+                    "",
+                )
+                if not matched_sec:
+                    continue
+                location = matched_sec
+                remote = _is_remote(location) or is_remote_flag or "remote" in workplace_type
             apply_url = job.get("applyUrl", "") or job.get("jobUrl", "")
             if not apply_url:
                 continue
@@ -833,11 +911,24 @@ def _fetch_single_lever(slug: str) -> list[dict]:
             posted_at = _parse_posted_at(job.get("createdAt"))
             if _is_too_old(posted_at):
                 continue
-            categories = job.get("categories", {})
+            categories = job.get("categories", {}) or {}
             location = categories.get("location", "") or categories.get("commitment", "")
-            remote = _is_remote(location)
+            workplace_type = (job.get("workplaceType") or "").lower()
+            remote = (workplace_type == "remote") or _is_remote(location, title)
             if not is_location_ok(location, remote):
-                continue
+                all_locs = [str(x).strip() for x in (categories.get("allLocations") or []) if x]
+                matched_alt = next(
+                    (
+                        al for al in all_locs
+                        if (_is_remote(al) or any(p.search(al.lower()) for p in _INDIA_PATTERNS))
+                        and is_location_ok(al, (workplace_type == "remote") or _is_remote(al))
+                    ),
+                    "",
+                )
+                if not matched_alt:
+                    continue
+                location = matched_alt
+                remote = (workplace_type == "remote") or _is_remote(location, title)
             apply_url = job.get("applyUrl", "") or job.get("hostedUrl", "")
             if not apply_url:
                 continue
@@ -891,7 +982,7 @@ def fetch_remoteok() -> list[dict]:
                 continue
             title = item.get("position", "").strip()
             company = item.get("company", "").strip()
-            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title) or _is_excluded_spam_listing(company, title):
                 continue
             posted_at = _parse_posted_at(item.get("date") or item.get("epoch"))
             if _is_too_old(posted_at):
@@ -938,7 +1029,7 @@ def fetch_remotive() -> list[dict]:
         for item in raw:
             title = item.get("title", "").strip()
             company = item.get("company_name", "").strip()
-            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title) or _is_excluded_spam_listing(company, title):
                 continue
             posted_at = _parse_posted_at(item.get("publication_date"))
             if _is_too_old(posted_at):
@@ -988,7 +1079,7 @@ def fetch_jobicy() -> list[dict]:
         for item in jobs:
             title = (item.get("jobTitle") or "").strip()
             company = (item.get("companyName") or "").strip()
-            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title) or _is_excluded_spam_listing(company, title):
                 continue
             posted_at = _parse_posted_at(item.get("pubDate"))
             if _is_too_old(posted_at):
@@ -1041,7 +1132,7 @@ def fetch_arbeitnow() -> list[dict]:
         for item in jobs:
             title = (item.get("title") or "").strip()
             company = (item.get("company_name") or "").strip()
-            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title) or _is_excluded_spam_listing(company, title):
                 continue
             posted_at = _parse_posted_at(item.get("created_at"))
             if _is_too_old(posted_at):
@@ -1090,7 +1181,7 @@ def fetch_hackernews() -> list[dict]:
     try:
         url = "https://hn.algolia.com/api/v1/search_by_date"
         params = {"tags": "story,author_whoishiring", "query": "Ask HN: Who is hiring?", "hitsPerPage": 1}
-        resp = _get_with_retry(url, params=params, timeout=15, raise_on_http_error=True)
+        resp = _get_with_retry(url, params=params, timeout=20, raise_on_http_error=True)
         hits = resp.json().get("hits", [])
         if not hits:
             logger.warning("hackernews: no 'Who is hiring' thread found")
@@ -1098,8 +1189,8 @@ def fetch_hackernews() -> list[dict]:
         story_id = hits[0]["objectID"]
 
         c_url = "https://hn.algolia.com/api/v1/search"
-        c_params = {"tags": f"comment,story_{story_id}", "hitsPerPage": 1000}
-        c_resp = _get_with_retry(c_url, params=c_params, timeout=15, raise_on_http_error=True)
+        c_params = {"tags": f"comment,story_{story_id}", "hitsPerPage": 500}
+        c_resp = _get_with_retry(c_url, params=c_params, timeout=25, raise_on_http_error=True)
         all_comments = c_resp.json().get("hits", [])
 
         ats_pattern = re.compile(r"greenhouse\.io|lever\.co|ashbyhq\.com|gh_jid=", re.IGNORECASE)
@@ -1132,7 +1223,8 @@ def fetch_hackernews() -> list[dict]:
             if not company or len(company) > 80:
                 company = company[:77].rstrip() + "..." if len(company) > 80 else "HN Startup"
 
-            is_remote_hn = "remote" in first_line.lower()
+            top_header = " ".join(lines[:2]) if "|" in first_line else first_line
+            is_remote_hn = "remote" in top_header.lower()
             first_line_no_urls = re.sub(r"https?://\S+", "", first_line).strip()
             # Validate full header line (catches `Company | Remote (US) | Full-time` ordering)
             if not is_location_ok(first_line_no_urls, is_remote_hn):
@@ -1206,18 +1298,27 @@ def fetch_hackernews() -> list[dict]:
 
 def fetch_himalayas(limit: int = 40) -> list[dict]:
     """
-    Fetch remote tech jobs from Himalayas API.
-    Queries entry-level and junior roles, normalizes to canonical JD schema,
-    and filters for tech relevance, location suitability, and experience caps.
+    Fetch remote tech jobs from Himalayas API + targeted India/Worldwide search endpoints.
+    Filters for tech relevance, early-career experience caps, and India/global/APAC eligibility.
     """
     listings: list[dict] = []
-    offsets = [0, 20] if limit > 20 else [0]
-    for offset in offsets:
+    if limit <= 20:
+        queries = [(HIMALAYAS_URL, {"offset": 0})]
+    else:
+        search_url = f"{HIMALAYAS_URL}/search"
+        queries = [
+            (HIMALAYAS_URL, {"offset": 0}),
+            (HIMALAYAS_URL, {"offset": 20}),
+            (search_url, {"q": "developer", "country": "IN"}),
+            (search_url, {"q": "full stack", "worldwide": "true"}),
+            (search_url, {"q": "backend", "worldwide": "true"}),
+        ]
+
+    for endpoint_url, params in queries:
         try:
-            params = {"seniority": "entry-level,junior", "offset": offset}
-            resp = _get_with_retry(HIMALAYAS_URL, params=params, headers=HEADERS, timeout=20)
+            resp = _get_with_retry(endpoint_url, params=params, headers=HEADERS, timeout=20)
             if resp.status_code != 200:
-                logger.warning("fetch_himalayas — HTTP %s at offset %s", resp.status_code, offset)
+                logger.warning("fetch_himalayas — HTTP %s at %s", resp.status_code, params)
                 continue
             data = resp.json()
             jobs = data.get("jobs", [])
@@ -1234,8 +1335,13 @@ def fetch_himalayas(limit: int = 40) -> list[dict]:
                 remote = True
                 if loc_restrictions:
                     loc_low = location.lower()
+                    loc_nodots = loc_low.replace(".", "")
+                    has_apac_sub_lock = any(p.search(loc_low) or p.search(loc_nodots) for p in _APAC_SUBCOUNTRY_LOCKS)
                     allows_india = any(p.search(loc_low) for p in _INDIA_PATTERNS)
-                    allows_global = any(w in loc_low for w in ("worldwide", "anywhere", "global", "all countries"))
+                    allows_global = (
+                        any(w in loc_low for w in ("worldwide", "anywhere", "global", "all countries"))
+                        or (bool(_APAC_TOKEN_RE.search(loc_low)) and not has_apac_sub_lock)
+                    )
                     if not (allows_india or allows_global):
                         continue
                 if not is_location_ok(location, remote):
@@ -1258,6 +1364,7 @@ def fetch_himalayas(limit: int = 40) -> list[dict]:
                 ))
         except Exception as e:
             _report_source_failure("himalayas", e)
+    listings = _dedup(listings)
     logger.info("fetch_himalayas — %d listings", len(listings))
     return listings
 
@@ -1282,7 +1389,7 @@ def fetch_simplify_jobs() -> list[dict]:
                 continue
             title = (item.get("title") or "").strip()
             company = (item.get("company_name") or "").strip()
-            if not title or not company or not _is_tech_job(title) or _is_senior_only(title):
+            if not title or not company or not _is_tech_job(title) or _is_senior_only(title) or _is_excluded_spam_listing(company, title):
                 continue
             posted_at = _parse_posted_at(item.get("date_updated") or item.get("date_posted"))
             if _is_too_old(posted_at):
@@ -1397,11 +1504,15 @@ def fetch_all() -> list[dict]:
         combined.extend(items)
     deduped = _dedup(combined)
 
-    # Filter out stale postings (> MAX_JOB_AGE_DAYS) and explicit US/EU/UK/CA work-auth knockouts
+    # Filter out stale postings (> MAX_JOB_AGE_DAYS; monthly Ask HN threads up to 31d) and explicit geo knockouts
     before_fresh = len(deduped)
+    hn_max_age = int(os.environ.get("MAX_HN_JOB_AGE_DAYS", "31"))
     deduped = [
         jd for jd in deduped
-        if not _is_too_old(jd.get("posted_at", ""))
+        if not _is_too_old(
+            jd.get("posted_at", ""),
+            max_age_days=hn_max_age if jd.get("source") == "hackernews" else None,
+        )
         and not has_geo_knockout_in_text(jd.get("title", ""), jd.get("description", ""))
     ]
     if before_fresh != len(deduped):
@@ -1454,11 +1565,11 @@ def fetch_all() -> list[dict]:
             if i < len(grouped[src]):
                 interleaved.append(grouped[src][i])
 
-    # Remote-First Prioritization with Recency & India-First Ordering inside each tier
+    # Direct ATS Priority + Remote-First + Recency & India-First Ordering
     remote_jobs = [j for j in interleaved if j.get("remote")]
     onsite_jobs = [j for j in interleaved if not j.get("remote")]
-    remote_jobs.sort(key=_recency_tier)
-    onsite_jobs.sort(key=_recency_tier)
+    remote_jobs.sort(key=lambda j: (0 if _is_direct_ats_url(j.get("apply_url", "")) else 1, _recency_tier(j)))
+    onsite_jobs.sort(key=lambda j: (0 if _is_direct_ats_url(j.get("apply_url", "")) else 1, _recency_tier(j)))
     interleaved = remote_jobs + onsite_jobs
 
     logger.info(
