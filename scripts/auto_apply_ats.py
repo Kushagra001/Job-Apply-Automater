@@ -1054,11 +1054,16 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
 
 
 def _wait_ashby_hydration(page, timeout_ms: int = 8_000) -> None:
-    """Wait briefly for Ashby SPA React root to hydrate before closed-page/form checks."""
+    """Wait for Ashby SPA React root to hydrate (inputs present OR closed/error message rendered, past 'Loading…')."""
     try:
         if hasattr(page, "wait_for_function"):
             page.wait_for_function(
-                "() => document.body && document.body.innerText.trim().length > 20",
+                "() => {"
+                "  const txt = (document.body && document.body.innerText) || '';"
+                "  if (txt.includes('Page not found') || txt.includes('not be found') || txt.includes('no longer')) return true;"
+                "  if (document.querySelector('input, textarea, select, #application-form')) return true;"
+                "  return !txt.trim().startsWith('Loading') && txt.length > 80;"
+                "}",
                 timeout=timeout_ms,
             )
     except Exception:
@@ -1541,6 +1546,14 @@ def apply(
                     return result
                 return (result, "") if result else (False, f"{ats_name} flow returned False")
             except PlaywrightTimeoutError as e:
+                try:
+                    if _detect_captcha(page):
+                        return False, "requires_captcha: Security challenge detected during form fill"
+                    closed, close_reason = _is_job_closed(page)
+                    if closed:
+                        return False, f"job_closed: {close_reason}"
+                except Exception:
+                    pass
                 msg = f"Timeout filling {ats_name if 'ats_name' in locals() else 'ATS'} form: {e}"
                 logger.warning(msg)
                 return False, msg

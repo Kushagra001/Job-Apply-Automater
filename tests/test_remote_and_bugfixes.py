@@ -470,3 +470,58 @@ def test_direct_ats_ordered_before_aggregators_and_spam_filtered(monkeypatch):
     assert fj._is_excluded_spam_listing("Firstwork", "Forward Deployed Engineer") is False
 
 
+def test_ashby_closed_page_hydration_and_timeout_classification(monkeypatch):
+    class FakePage:
+        url = "https://jobs.ashbyhq.com/cursor/12345678-1234-1234-1234-123456789012/application"
+        def wait_for_function(self, fn_str, timeout=8000):
+            assert "Page not found" in fn_str
+            assert "Loading" in fn_str
+            return True
+
+    fake_page = FakePage()
+    ats._wait_ashby_hydration(fake_page)
+
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    class MockPlaywright:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        class chromium:
+            @staticmethod
+            def launch(*a, **kw):
+                class FakeBrowser:
+                    def new_context(self, *a, **kw):
+                        class FakeContext:
+                            def new_page(self):
+                                p = MagicMock()
+                                p.url = "https://jobs.ashbyhq.com/cursor/12345678-1234-1234-1234-123456789012/application"
+                                p.goto = MagicMock()
+                                return p
+                            def close(self): pass
+                        return FakeContext()
+                    def close(self): pass
+                return FakeBrowser()
+
+    monkeypatch.setattr(ats, "sync_playwright", lambda: MockPlaywright())
+    monkeypatch.setattr(ats, "Stealth", lambda: SimpleNamespace(apply_stealth_sync=lambda p: None))
+    monkeypatch.setattr(ats, "_detect_captcha", lambda p: False)
+
+    def mock_flow(*a, **kw):
+        raise PlaywrightTimeoutError("Timeout waiting for input")
+
+    closed_states = [False, True]
+    monkeypatch.setattr(ats, "_is_job_closed", lambda p: (closed_states.pop(0), "Page not found (404)"))
+    monkeypatch.setitem(ats._ATS_FLOW_MAP, "ashby", mock_flow)
+
+    success, msg = ats.apply(
+        {"apply_url": "https://jobs.ashbyhq.com/cursor/12345678-1234-1234-1234-123456789012/application"},
+        pdf_path="dummy.pdf",
+        dry_run=True,
+    )
+    assert success is False
+    assert "job_closed: Page not found" in msg
+
+
+
