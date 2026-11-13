@@ -55,6 +55,7 @@ _PROCESSED_URLS_CACHE_DRY_RUN: bool | None = None
 _DIGEST_BUFFER = {
     "applied_tailored": [],
     "applied_base": [],
+    "dry_run_success": [],
     "requires_captcha": [],
     "outreach_drafts": [],
     "failed": [],
@@ -330,8 +331,11 @@ def send_daily_digest() -> None:
     if total == 0:
         return
 
+    dry_runs = _DIGEST_BUFFER.get("dry_run_success", [])
     outreach_list = _DIGEST_BUFFER.get("outreach_drafts", [])
     msg = f"<b>Job Application Pipeline Complete</b> 🏁\n\n"
+    if dry_runs:
+        msg += f"🧪 Dry Run (Forms Filled): {len(dry_runs)}\n"
     msg += f"🟢 Applied (tailored): {len(_DIGEST_BUFFER.get('applied_tailored', []))}\n"
     msg += f"🟡 Applied (base): {len(_DIGEST_BUFFER.get('applied_base', []))}\n"
     if outreach_list:
@@ -340,6 +344,17 @@ def send_daily_digest() -> None:
         msg += f"⚠️ Requires Captcha: {len(_DIGEST_BUFFER['requires_captcha'])}\n"
     msg += f"🔴 Failed: {len(_DIGEST_BUFFER.get('failed', []))}\n"
     msg += f"⏭️ Skipped: {len(_DIGEST_BUFFER.get('skipped', []))}\n\n"
+
+    if dry_runs:
+        msg += "<b>🧪 Dry Run Forms Filled:</b>\n"
+        for d in dry_runs[:5]:
+            comp = html.escape(str(d.get("company", "")))
+            title = html.escape(str(d.get("title", "")))
+            score = d.get("score", 0)
+            msg += f"• {comp} — {title} (Score: {score})\n"
+        if len(dry_runs) > 5:
+            msg += f"<i>...and {len(dry_runs) - 5} more</i>\n"
+        msg += "\n"
 
     if outreach_list:
         msg += "<b>Cold Outreach Drafts (Review &amp; Send):</b>\n"
@@ -418,6 +433,8 @@ def log_result(
         _DIGEST_BUFFER["applied_tailored"].append(row)
     elif status == "apply_success_base":
         _DIGEST_BUFFER["applied_base"].append(row)
+    elif status == "dry_run_success":
+        _DIGEST_BUFFER["dry_run_success"].append(row)
     elif status == "requires_captcha":
         _DIGEST_BUFFER["requires_captcha"].append(row)
         try:

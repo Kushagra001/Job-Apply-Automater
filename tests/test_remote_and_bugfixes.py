@@ -524,4 +524,24 @@ def test_ashby_closed_page_hydration_and_timeout_classification(monkeypatch):
     assert "job_closed: Page not found" in msg
 
 
+def test_telegram_digest_dry_run_success_reporting(monkeypatch):
+    log_mod._DIGEST_BUFFER = {
+        "applied_tailored": [],
+        "applied_base": [],
+        "dry_run_success": [{"company": "Firstwork", "title": "Forward Deployed Engineer", "score": 95}],
+        "requires_captcha": [],
+        "outreach_drafts": [],
+        "failed": [],
+        "skipped": [],
+    }
+    sent_msgs = []
+    monkeypatch.setattr(log_mod, "notify_telegram", lambda msg: sent_msgs.append(msg))
+    log_mod.send_daily_digest()
+
+    assert len(sent_msgs) == 1
+    assert "Dry Run (Forms Filled): 1" in sent_msgs[0]
+    assert "Firstwork — Forward Deployed Engineer (Score: 95)" in sent_msgs[0]
+
+
+
 
