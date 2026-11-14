@@ -286,5 +286,5 @@ These are things only the owner (Kushagra) can unblock:
 | Supply resume template design | Checkpoint 6 | ✅ Done |
 | Create Google Sheet + share with service account | Checkpoint 7 | ✅ Done |
 | Create GCP service account + download JSON key | Checkpoint 7 | ✅ Done |
-| Add all secrets to GitHub Actions | Checkpoint 9 | ⏳ Pending |
-| Decide cron schedule frequency | Checkpoint 9 | ⏳ Pending |
+| Add all secrets to GitHub Actions | Checkpoint 9 | ✅ Done |
+| Decide cron schedule frequency | Checkpoint 9 | ✅ Done (Every 6h Mon-Fri) |
