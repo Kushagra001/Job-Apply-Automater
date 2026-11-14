@@ -439,9 +439,10 @@ def main():
             apply_notes = str(e)
             success = False
 
+        norm_c = normalize_company_name(company)
+        run_company_applied[norm_c] = run_company_applied.get(norm_c, 0) + 1
+
         if status in ("apply_success_tailored", "apply_success_base", "dry_run_success"):
-            norm_c = normalize_company_name(company)
-            run_company_applied[norm_c] = run_company_applied.get(norm_c, 0) + 1
             if should_draft_outreach(jd, score):
                 try:
                     create_outreach_draft(

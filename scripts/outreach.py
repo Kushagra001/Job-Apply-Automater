@@ -276,6 +276,7 @@ Strict Rules:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.2,
+                    max_tokens=600,
                 )
                 parsed = json.loads(_clean_llm_json(resp.choices[0].message.content))
                 if isinstance(parsed, list) and parsed:

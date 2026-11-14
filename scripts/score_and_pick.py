@@ -200,8 +200,8 @@ def keyword_score_jd(jd: dict, variants: dict[str, dict] | None = None) -> dict[
 # Retired/404 models removed: groq/compound, groq/compound-mini, llama-3.3-70b-versatile
 FALLBACK_MODELS = [
     "openai/gpt-oss-20b",          # fast, structured JSON reliable -> PRIMARY
-    "qwen/qwen3.8-27b",            # fast secondary fallback -> SECONDARY
-    "openai/gpt-oss-120b",         # deeper reasoning -> TERTIARY
+    "openai/gpt-oss-120b",         # deeper reasoning & higher OTPM limit -> SECONDARY
+    "qwen/qwen3.8-27b",            # fast fallback (OTPM capped at 1000) -> TERTIARY
     "openai/gpt-oss-safeguard-20b",# last resort
 ]
 
@@ -285,6 +285,7 @@ def score_jd_against_all_variants(jd: dict, variants: dict[str, dict]) -> dict[s
                 ],
                 response_format={"type": "json_object"},
                 temperature=0,
+                max_tokens=600,
             )
             result = json.loads(_clean_llm_json(response.choices[0].message.content))
             if isinstance(result, list):

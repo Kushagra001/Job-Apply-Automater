@@ -250,8 +250,8 @@ def _prioritize_matching_skills(skills: list[str], jd: dict) -> list[str]:
 # Active Groq JSON-capable models verified against /v1/models (2026-11-12)
 FALLBACK_MODELS = [
     "openai/gpt-oss-20b",          # fast, structured JSON reliable -> PRIMARY
-    "qwen/qwen3.8-27b",            # fast secondary fallback -> SECONDARY
-    "openai/gpt-oss-120b",         # deeper reasoning -> TERTIARY
+    "openai/gpt-oss-120b",         # deeper reasoning & higher OTPM limit -> SECONDARY
+    "qwen/qwen3.8-27b",            # fast fallback (OTPM capped at 1000) -> TERTIARY
     "openai/gpt-oss-safeguard-20b",# last resort
 ]
 
@@ -300,15 +300,18 @@ def tailor_resume(variant_json: dict, jd: dict) -> dict:
 
     for model_name in models_to_try:
         try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
+            create_kwargs = {
+                "model": model_name,
+                "messages": [
                     {"role": "system", "content": "You output JSON only. Adhere strictly to the schema and anti-hallucination rules."},
                     {"role": "user", "content": prompt},
                 ],
-                response_format={"type": "json_object"},
-                temperature=0,
-            )
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            }
+            if "qwen" in model_name.lower():
+                create_kwargs["max_tokens"] = 950
+            response = client.chat.completions.create(**create_kwargs)
             tailored = json.loads(_clean_llm_json(response.choices[0].message.content))
             if isinstance(tailored, list):
                 tailored = tailored[0] if tailored else {}

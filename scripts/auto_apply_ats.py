@@ -240,6 +240,20 @@ def _detect_captcha(page) -> bool:
             logger.warning("Active challenge page detected via title: '%s'", title)
             return True
 
+        # Check all frames for active challenge URLs (e.g. Lever hCaptcha challenge iframe)
+        if hasattr(page, "frames"):
+            for f in page.frames:
+                f_url = (getattr(f, "url", "") or "").lower()
+                if any(k in f_url for k in [
+                    "hcaptcha.html#frame=challenge",
+                    "challenges.cloudflare.com",
+                    "recaptcha/api2/bframe",
+                    "recaptcha/enterprise/bframe",
+                    "arkoselabs",
+                ]):
+                    logger.warning("Active challenge frame detected via URL: %s", getattr(f, "url", "")[:80])
+                    return True
+
         captcha_selectors = [
             "iframe[src*='challenges.cloudflare.com']",
             "iframe[src*='recaptcha']",
@@ -251,9 +265,11 @@ def _detect_captcha(page) -> bool:
         ]
         for sel in captcha_selectors:
             loc = page.locator(sel)
-            if loc.count() > 0 and loc.first.is_visible():
-                logger.warning("Active captcha detected via selector: %s", sel)
-                return True
+            if loc.count() > 0:
+                for el in loc.all():
+                    if el.is_visible():
+                        logger.warning("Active captcha detected via selector: %s", sel)
+                        return True
 
         return False
     except Exception as e:
@@ -531,8 +547,63 @@ def _fill_common_custom_fields(page) -> None:
                         logger.debug("Checked required/consent checkbox: %s", cb_context[:50])
             except Exception:
                 pass
+
+        # 4. Button toggles for Yes/No questions (Ashby, modern ATS forms)
+        _fill_button_toggles(page)
     except Exception as e:
         logger.debug("Non-fatal issue filling custom fields: %s", e)
+
+
+def _dismiss_cookie_banner(page) -> None:
+    """Dismiss cookie banners or privacy modals that could intercept clicks or overlay submit buttons."""
+    try:
+        cookie_btns = page.locator(
+            "button:has-text('Necessary Only'), button:has-text('Accept All'), "
+            "button:has-text('Accept all cookies'), button#onetrust-accept-btn-handler, "
+            "button:has-text('I Agree'), button:has-text('Got it')"
+        )
+        if cookie_btns.count() > 0 and cookie_btns.first.is_visible():
+            cookie_btns.first.click(timeout=3_000)
+    except Exception:
+        pass
+
+
+def _fill_button_toggles(page) -> None:
+    """
+    Handle Yes/No button toggles commonly used on Ashby and modern ATS forms.
+    Inspects question containers containing Yes/No button pairs and evaluates
+    them truthfully based on candidate's location and foreign work-auth context.
+    """
+    try:
+        containers = page.locator("div[class*='container' i], div[class*='Container' i], div[class*='field' i]").all()
+        for c in containers:
+            try:
+                buttons = c.locator("button").all()
+                if len(buttons) != 2:
+                    continue
+                b_texts = [b.inner_text().strip().lower() for b in buttons]
+                if set(b_texts) != {"yes", "no"}:
+                    continue
+
+                ctx = (c.inner_text() or "").lower()
+                is_foreign = bool(_FOREIGN_AUTH_COUNTRIES_RE.search(ctx)) and not bool(_INDIA_AUTH_RE.search(ctx))
+
+                target_option = None
+                if any(k in ctx for k in ("authorized", "legally authorized", "right to work", "eligible to work", "work authorization", "work auth")):
+                    target_option = "no" if is_foreign else "yes"
+                elif any(k in ctx for k in ("sponsorship", "sponsor", "require sponsorship", "visa")):
+                    target_option = "yes" if is_foreign else "no"
+
+                if target_option:
+                    btn_to_click = buttons[0] if b_texts[0] == target_option else buttons[1]
+                    is_pressed = btn_to_click.get_attribute("aria-pressed") == "true" or "_active" in (btn_to_click.get_attribute("class") or "")
+                    if not is_pressed:
+                        btn_to_click.click()
+                        logger.info("Clicked '%s' button toggle for: %s", target_option.upper(), ctx[:60])
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug("Non-fatal issue filling button toggles: %s", e)
 
 
 def _answer_custom_questions(page, jd: dict, zero_llm_mode: bool = False) -> None:
@@ -681,6 +752,7 @@ Instructions:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
+                    max_tokens=600,
                 )
                 answers = json.loads(_clean_llm_json(resp.choices[0].message.content))
                 if isinstance(answers, list) and answers:
@@ -725,7 +797,7 @@ Instructions:
         logger.warning("Error during custom question answering: %s", e)
 
 
-def _verify_submission(page, ats_name: str, scope=None) -> tuple[bool, str]:
+def _verify_submission(page, ats_name: str = "", scope=None) -> tuple[bool, str]:
     """
     Verify whether the ATS form was genuinely submitted successfully.
     Checks:
@@ -733,45 +805,12 @@ def _verify_submission(page, ats_name: str, scope=None) -> tuple[bool, str]:
     2. Absence of blocking form error messages
     3. Navigation to confirmation URL
     4. Confirmation text presence (on page or embedded iframe)
-    5. Never returns True merely because the submit button vanished
+    5. Checks if submit button is still visible and enabled
     """
     try:
-        page.wait_for_timeout(3000)
-
-        if _detect_captcha(page):
-            return False, "requires_captcha: Security challenge appeared after submit"
-
-        scopes_to_check = [page]
-        if scope is not None and scope is not page:
-            scopes_to_check.insert(0, scope)
-
-        # 1. Check for blocking validation errors first
-        error_locators = [
-            ".error", ".form-error", ".field-error", ".alert-error",
-            "[aria-invalid='true']", ".has-error", "div.error-message",
-            "p.error-message", "span.error"
+        confirmation_url_keywords = [
+            "confirmation", "thanks", "thank-you", "thank_you", "submitted", "success", "application_submitted"
         ]
-        for target in scopes_to_check:
-            try:
-                for sel in error_locators:
-                    errors = target.locator(sel)
-                    if errors.count() > 0:
-                        for idx in range(min(errors.count(), 3)):
-                            err_elem = errors.nth(idx)
-                            if err_elem.is_visible():
-                                err_text = err_elem.inner_text().strip()
-                                if err_text:
-                                    return False, f"Validation error: {err_text[:120]}"
-            except Exception:
-                continue
-
-        # 2. Check current URL for confirmation indicators
-        curr_url = page.url.lower()
-        confirmation_url_keywords = ["confirmation", "thanks", "thank-you", "thank_you", "submitted", "success", "application_submitted"]
-        if any(kw in curr_url for kw in confirmation_url_keywords):
-            return True, "Confirmation URL reached"
-
-        # 3. Check page/iframe content for confirmation text
         success_phrases = [
             "thank you for applying",
             "thank you for submitting",
@@ -784,25 +823,120 @@ def _verify_submission(page, ats_name: str, scope=None) -> tuple[bool, str]:
             "thank you for your interest",
             "your application was submitted",
             "application complete",
+            "submission received",
+            "application received",
         ]
-        for target in scopes_to_check:
-            try:
-                body = target.locator("body")
-                if body.count() > 0:
-                    page_text = body.inner_text().lower()
-                    if any(phrase in page_text for phrase in success_phrases):
-                        return True, "Success text found on page"
-            except Exception:
-                continue
+        submit_btn_selectors = [
+            "button[type='submit']",
+            "button#submit_app",
+            "button#btn-submit",
+            "button.ashby-application-form-submit-button",
+            "button[data-qa='btn-submit']",
+            "button:has-text('Submit Application')",
+            "button:has-text('SUBMIT APPLICATION')",
+            "button:has-text('Submit')",
+        ]
 
-        # 4. Check if submit button is still visible and enabled
+        scopes_to_check = [page]
+        if scope is not None and scope is not page:
+            scopes_to_check.insert(0, scope)
+
+        error_locators = [
+            ".error", ".form-error", ".field-error", ".alert-error",
+            "[aria-invalid='true']", ".has-error", "div.error-message",
+            "p.error-message", "span.error", "div.grecaptcha-error"
+        ]
+
+        # Poll for up to 8 seconds for the SPA/form submission network round-trip
+        for _ in range(8):
+            page.wait_for_timeout(1000)
+
+            if _detect_captcha(page):
+                return False, f"requires_captcha: Security challenge appeared after submit on {ats_name}"
+
+            # 1. Check for blocking validation errors first
+            for target in scopes_to_check:
+                try:
+                    for sel in error_locators:
+                        errors = target.locator(sel)
+                        if errors.count() > 0:
+                            for idx in range(min(errors.count(), 3)):
+                                err_elem = errors.nth(idx)
+                                if err_elem.is_visible():
+                                    err_text = err_elem.inner_text().strip()
+                                    if err_text:
+                                        return False, f"Validation error: {err_text[:120]}"
+                except Exception:
+                    continue
+
+            # 2. Check current URL for confirmation indicators
+            curr_url = page.url.lower()
+            if any(kw in curr_url for kw in confirmation_url_keywords):
+                return True, "Confirmation URL reached"
+
+            # 3. Check page/iframe content for confirmation text
+            for target in scopes_to_check:
+                try:
+                    body = target.locator("body")
+                    if body.count() > 0:
+                        page_text = body.inner_text().lower()
+                        if any(phrase in page_text for phrase in success_phrases):
+                            return True, "Success text found on page"
+                except Exception:
+                    continue
+
+            # 4. Check platform-specific success containers
+            if ats_name == "ashby":
+                for sel in [".ashby-application-form-success", "div[class*='Success' i]", "svg[class*='success' i]", "div:has-text('Application Submitted')"]:
+                    if page.locator(sel).count() > 0:
+                        return True, "Ashby confirmation container found"
+            elif ats_name == "lever":
+                if page.locator(".application-confirmation, div.thanks, div:has-text('Application submitted')").count() > 0:
+                    return True, "Lever confirmation container reached"
+
+            # 5. Check if submit button has disappeared
+            btn_visible = False
+            for target in scopes_to_check:
+                for sel in submit_btn_selectors:
+                    try:
+                        b = target.locator(sel)
+                        if b.count() > 0 and b.first.is_visible():
+                            btn_visible = True
+                            break
+                    except Exception:
+                        continue
+                if btn_visible:
+                    break
+
+            if not btn_visible:
+                # Submit button vanished and no validation errors; wait 1 more second and re-check text
+                page.wait_for_timeout(1000)
+                for target in scopes_to_check:
+                    try:
+                        body = target.locator("body")
+                        if body.count() > 0:
+                            page_text = body.inner_text().lower()
+                            if any(phrase in page_text for phrase in success_phrases):
+                                return True, "Success text found on page"
+                    except Exception:
+                        continue
+                if ats_name == "ashby":
+                    for sel in [".ashby-application-form-success", "div[class*='Success' i]", "svg[class*='success' i]", "div:has-text('Application Submitted')"]:
+                        if page.locator(sel).count() > 0:
+                            return True, "Ashby confirmation container found"
+                elif ats_name == "lever":
+                    if page.locator(".application-confirmation, div.thanks, div:has-text('Application submitted')").count() > 0:
+                        return True, "Lever confirmation container reached"
+
+        # If submit button is still visible after polling, submission did not advance
         for target in scopes_to_check:
-            try:
-                submit_btn = target.locator("button[type='submit'], button#submit_app, button#btn-submit")
-                if submit_btn.count() > 0 and submit_btn.first.is_visible():
-                    return False, "Submit button still visible after click with no confirmation (form did not advance)"
-            except Exception:
-                continue
+            for sel in submit_btn_selectors:
+                try:
+                    b = target.locator(sel)
+                    if b.count() > 0 and b.first.is_visible():
+                        return False, "Submit button still visible after click with no confirmation (form did not advance)"
+                except Exception:
+                    continue
 
         return False, "Submission unverified: no confirmation URL or success text detected"
     except Exception as e:
@@ -814,6 +948,8 @@ def _verify_submission(page, ats_name: str, scope=None) -> tuple[bool, str]:
 def _apply_greenhouse(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str = "", zero_llm_mode: bool = False) -> tuple[bool, str]:
     """Fill and optionally submit a Greenhouse application form."""
     logger.info("Starting Greenhouse flow...")
+
+    _dismiss_cookie_banner(page)
 
     if _detect_captcha(page):
         logger.warning("Active captcha or challenge detected on Greenhouse form for %s", jd.get("company"))
@@ -960,6 +1096,8 @@ def _apply_lever(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     """Fill and optionally submit a Lever application form."""
     logger.info("Starting Lever flow...")
 
+    _dismiss_cookie_banner(page)
+
     if _detect_captcha(page):
         logger.warning("Active captcha or challenge detected on Lever form for %s", jd.get("company"))
         return False, "requires_captcha: Cloudflare or reCAPTCHA detected"
@@ -1074,6 +1212,7 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
     """Fill and optionally submit an Ashby application form."""
     logger.info("Starting Ashby flow...")
 
+    _dismiss_cookie_banner(page)
     _wait_ashby_hydration(page)
 
     if _detect_captcha(page):
@@ -1177,6 +1316,8 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
             _human_type(cl_input.first, cover_letter, min_delay_ms=5, max_delay_ms=15)
 
     _answer_custom_questions(page, jd, zero_llm_mode=zero_llm_mode)
+    _fill_button_toggles(page)
+    _dismiss_cookie_banner(page)
 
     if _detect_captcha(page):
         logger.warning("Active captcha detected on Ashby form for %s", jd.get("company"))
@@ -1186,7 +1327,7 @@ def _apply_ashby(page, jd: dict, pdf_path: str, dry_run: bool, cover_letter: str
         logger.info("Submitting Ashby application...")
         submit_btn = None
         for s in page.locator(
-            "button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit')"
+            "button.ashby-application-form-submit-button, button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit')"
         ).all():
             if s.is_visible():
                 submit_btn = s

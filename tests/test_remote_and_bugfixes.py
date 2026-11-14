@@ -543,5 +543,119 @@ def test_telegram_digest_dry_run_success_reporting(monkeypatch):
     assert "Firstwork — Forward Deployed Engineer (Score: 95)" in sent_msgs[0]
 
 
+def test_fill_button_toggles_and_cookie_banner():
+    page = MagicMock()
+
+    # Mock cookie banner
+    cookie_btn = MagicMock()
+    cookie_btn.is_visible.return_value = True
+    cookie_loc = MagicMock()
+    cookie_loc.count.return_value = 1
+    cookie_loc.first = cookie_btn
+
+    # Mock container with Yes/No buttons
+    btn_yes = MagicMock()
+    btn_yes.inner_text.return_value = "Yes"
+    btn_yes.get_attribute.return_value = "false"
+    btn_no = MagicMock()
+    btn_no.inner_text.return_value = "No"
+    btn_no.get_attribute.return_value = "false"
+
+    container = MagicMock()
+    container.inner_text.return_value = "Are you legally authorized to work in the country in which the job is located?\nYes\nNo"
+    container.locator.return_value.all.return_value = [btn_yes, btn_no]
+
+    def locator_side_effect(sel):
+        if "Accept All" in sel or "Necessary Only" in sel:
+            return cookie_loc
+        if "container" in sel.lower():
+            m = MagicMock()
+            m.all.return_value = [container]
+            return m
+        empty = MagicMock()
+        empty.count.return_value = 0
+        empty.all.return_value = []
+        return empty
+
+    page.locator.side_effect = locator_side_effect
+
+    ats._dismiss_cookie_banner(page)
+    cookie_btn.click.assert_called_once()
+
+    ats._fill_button_toggles(page)
+    btn_yes.click.assert_called_once()
+
+
+def test_detect_captcha_multi_iframe_and_frames_url():
+    # 1. Test detection via frame URL in page.frames
+    page = MagicMock()
+    page.title.return_value = "Apply for Role"
+    frame1 = MagicMock()
+    frame1.url = "https://newassets.hcaptcha.com/captcha/v1/static/hcaptcha-enclave.html#frame=enclave"
+    frame2 = MagicMock()
+    frame2.url = "https://newassets.hcaptcha.com/captcha/v1/static/hcaptcha.html#frame=challenge"
+    page.frames = [frame1, frame2]
+    empty_loc = MagicMock()
+    empty_loc.count.return_value = 0
+    empty_loc.all.return_value = []
+    page.locator.return_value = empty_loc
+
+    assert ats._detect_captcha(page) is True
+
+    # 2. Test detection when first iframe is hidden but second is visible
+    page2 = MagicMock()
+    page2.title.return_value = "Apply for Role"
+    page2.frames = []
+    el_hidden = MagicMock()
+    el_hidden.is_visible.return_value = False
+    el_visible = MagicMock()
+    el_visible.is_visible.return_value = True
+
+    hcaptcha_loc = MagicMock()
+    hcaptcha_loc.count.return_value = 2
+    hcaptcha_loc.all.return_value = [el_hidden, el_visible]
+
+    def loc_effect(sel):
+        if "hcaptcha" in sel:
+            return hcaptcha_loc
+        m = MagicMock()
+        m.count.return_value = 0
+        m.all.return_value = []
+        return m
+
+    page2.locator.side_effect = loc_effect
+    assert ats._detect_captcha(page2) is True
+
+
+def test_verify_submission_ashby_button_and_container():
+    page = MagicMock()
+    page.url = "https://jobs.ashbyhq.com/example/1234/application"
+    page.title.return_value = "Ashby Job"
+    page.frames = []
+
+    success_container = MagicMock()
+    success_container.count.return_value = 1
+
+    empty_loc = MagicMock()
+    empty_loc.count.return_value = 0
+    empty_loc.all.return_value = []
+
+    def loc_effect(sel):
+        if sel == "body":
+            b = MagicMock()
+            b.count.return_value = 1
+            b.inner_text.return_value = "Thank you for applying! Your application has been received."
+            return b
+        if ".ashby-application-form-success" in sel:
+            return success_container
+        return empty_loc
+
+    page.locator.side_effect = loc_effect
+    ok, reason = ats._verify_submission(page, "ashby")
+    assert ok is True
+    assert "Success text found on page" in reason or "Ashby confirmation container" in reason
+
+
+
 
 
