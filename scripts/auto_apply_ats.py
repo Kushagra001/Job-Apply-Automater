@@ -734,11 +734,12 @@ Instructions:
 5. Never falsely claim US/UK/Canada/EU citizenship or local work authorization if asked specifically about those jurisdictions; answer truthfully that candidate is based in India (available remotely via contractor/EOR or for India roles).
 6. Return JSON format mapping question ID to the answer string:
    {{"custom_field_0": "answer", ...}}
+7. Keep all text answers concise and direct (under 2 sentences per question) to ensure the JSON document completes cleanly.
 """
         try:
             from scripts.score_and_pick import FALLBACK_MODELS as _SHARED_FALLBACK_MODELS, _clean_llm_json
         except Exception:
-            _SHARED_FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+            _SHARED_FALLBACK_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
             _clean_llm_json = lambda s: (s or "{}").strip()
 
         forced_model = os.environ.get("GROQ_MODEL")
@@ -754,7 +755,7 @@ Instructions:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_tokens=600,
+                    max_tokens=800,
                 )
                 answers = json.loads(_clean_llm_json(resp.choices[0].message.content))
                 if isinstance(answers, list) and answers:
