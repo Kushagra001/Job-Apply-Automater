@@ -83,13 +83,20 @@ GREENHOUSE_COMPANIES = [
     "typeform", "mixpanel", "amplitude", "dbt-labs", "hashicorp",
     "chainguard", "automattic", "remote", "springboard", "xohealth",
     "valtech", "yipitdata", "bloomreach", "smartsheet", "togetherai", "enveritas",
+    "sourcegraph", "sentry", "duckduckgo", "docker", "netlify", "digitalocean",
+    "buffer", "zapier", "wikimedia", "mozilla", "redis", "timescale",
+    "clickhouse", "starburst", "launchdarkly", "pagerduty", "newrelic",
+    "hasura", "apollographql", "anyscale", "weightsbiases", "deepgram",
+    "assemblyai", "glean", "hootsuite", "ghost", "monzo", "retool",
+    "snyk", "segment", "circleci", "cockroachlabs",
     # Verified India tech / engineering hubs on Greenhouse
     "rubrik", "databricks", "fivetran", "druva", "commerceiq", "zscaler",
     "coinbase", "inmobi", "groww", "twilio", "datadog", "mongodb",
     "figma", "dropbox", "atlassian", "github", "confluent", "snowflake",
     "hubspot", "shopify", "canva", "stripe", "square", "robinhood",
     "plaid", "checkr", "gusto", "zendesk", "okta",
-    "mercury", "lattice", "brex",
+    "mercury", "lattice", "brex", "browserstack", "thoughtworks",
+    "clevertap", "harness", "razorpay", "cars24", "urbancompany",
 ]
 
 ASHBY_COMPANIES = [
@@ -108,6 +115,9 @@ ASHBY_COMPANIES = [
 LEVER_COMPANIES = [
     # Verified active Lever boards (India SaaS/product + global remote tech)
     "fly", "fampay", "hevodata", "cred", "meesho", "paytm", "binance", "spotify",
+    "ripple", "consensys", "chainalysis", "opensea", "polygon",
+    "near", "chainlink", "matterlabs", "smallcase", "juspay",
+    "dream11", "deliveroo", "booking", "quora",
 ]
 
 YC_COMPANIES = [
@@ -1552,10 +1562,10 @@ def fetch_all() -> list[dict]:
     for src_list in grouped.values():
         src_list.sort(key=lambda j: (0 if j.get("remote") else 1, _recency_tier(j)))
 
-    # Round-Robin Interleave across sources
+    # Round-Robin Interleave across sources (Direct ATS first)
     source_order = [
-        "ashby", "lever", "jobicy", "arbeitnow", "remoteok", "remotive",
-        "greenhouse", "hackernews", "himalayas", "simplify", "yc_startups",
+        "greenhouse", "lever", "ashby", "yc_startups", "jobicy", "arbeitnow", "remoteok", "remotive",
+        "hackernews", "himalayas", "simplify",
     ]
     interleaved: list[dict] = []
     max_count = max((len(lst) for lst in grouped.values()), default=0)

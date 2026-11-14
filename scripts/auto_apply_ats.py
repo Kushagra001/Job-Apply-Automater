@@ -268,7 +268,39 @@ def _detect_captcha(page) -> bool:
                         if el.is_visible():
                             box = el.bounding_box()
                             if box and box["width"] > 20 and box["height"] > 20:
-                                logger.warning("Active visible captcha detected via selector: %s (%dx%d)", sel, int(box["width"]), int(box["height"]))
+                                # 1. Off-screen check: Google reCAPTCHA Enterprise keeps background evaluation
+                                # bframe at top: -10000px, left: -10000px or off-screen.
+                                x = box.get("x", 0)
+                                y = box.get("y", 0)
+                                if x < -100 or y < -100:
+                                    continue
+                                if (y + box["height"] <= 0) or (x + box["width"] <= 0):
+                                    continue
+                                # 2. Computed style check: ensure container is actually visible (not visibility: hidden, display: none, opacity: 0)
+                                is_hidden = False
+                                try:
+                                    is_hidden = el.evaluate("""(e) => {
+                                        function check(node) {
+                                            if (!node || node.nodeType !== 1) return false;
+                                            const s = window.getComputedStyle(node);
+                                            return s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity || '1') === 0;
+                                        }
+                                        let cur = e;
+                                        for (let i = 0; i < 4; i++) {
+                                            if (!cur) break;
+                                            if (check(cur)) return true;
+                                            cur = cur.parentElement;
+                                        }
+                                        return false;
+                                    }""")
+                                except Exception:
+                                    is_hidden = False
+                                if is_hidden is True:
+                                    continue
+                                logger.warning(
+                                    "Active visible captcha detected via selector: %s (%dx%d at x=%d, y=%d)",
+                                    sel, int(box["width"]), int(box["height"]), int(x), int(y)
+                                )
                                 return True
                     except Exception:
                         continue
@@ -854,9 +886,6 @@ def _verify_submission(page, ats_name: str = "", scope=None) -> tuple[bool, str]
         for _ in range(8):
             page.wait_for_timeout(1000)
 
-            if _detect_captcha(page):
-                return False, f"requires_captcha: Security challenge appeared after submit on {ats_name}"
-
             # 1. Check for blocking validation errors first
             for target in scopes_to_check:
                 try:
@@ -896,6 +925,10 @@ def _verify_submission(page, ats_name: str = "", scope=None) -> tuple[bool, str]
             elif ats_name == "lever":
                 if page.locator(".application-confirmation, div.thanks, div:has-text('Application submitted')").count() > 0:
                     return True, "Lever confirmation container reached"
+
+            # 5. Check for genuine active security challenge if no success confirmation yet
+            if _detect_captcha(page):
+                return False, f"requires_captcha: Security challenge appeared after submit on {ats_name}"
 
             # 5. Check if submit button has disappeared
             btn_visible = False

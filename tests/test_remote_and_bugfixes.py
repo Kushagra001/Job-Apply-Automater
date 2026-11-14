@@ -658,6 +658,61 @@ def test_verify_submission_ashby_button_and_container():
     assert "Success text found on page" in reason or "Ashby confirmation container" in reason
 
 
+def test_detect_captcha_ignores_offscreen_and_hidden_recaptcha_frames():
+    page = MagicMock()
+    page.title.return_value = "Ashby Application"
+    page.frames = []
+
+    # Mock an off-screen bframe positioned at top: -10000px, left: -10000px
+    offscreen_elem = MagicMock()
+    offscreen_elem.is_visible.return_value = True
+    offscreen_elem.bounding_box.return_value = {"x": -10000, "y": -10000, "width": 404, "height": 584}
+    offscreen_elem.evaluate.return_value = True  # is_hidden = True
+
+    loc = MagicMock()
+    loc.count.return_value = 1
+    loc.all.return_value = [offscreen_elem]
+
+    def loc_effect(sel):
+        if "recaptcha" in sel:
+            return loc
+        m = MagicMock()
+        m.count.return_value = 0
+        m.all.return_value = []
+        return m
+
+    page.locator.side_effect = loc_effect
+    assert ats._detect_captcha(page) is False
+
+
+def test_detect_captcha_triggers_on_visible_onscreen_challenge():
+    page = MagicMock()
+    page.title.return_value = "Ashby Application"
+    page.frames = []
+
+    # Mock an active onscreen challenge modal at x=350, y=120
+    onscreen_elem = MagicMock()
+    onscreen_elem.is_visible.return_value = True
+    onscreen_elem.bounding_box.return_value = {"x": 350, "y": 120, "width": 400, "height": 580}
+    onscreen_elem.evaluate.return_value = False  # is_hidden = False
+
+    loc = MagicMock()
+    loc.count.return_value = 1
+    loc.all.return_value = [onscreen_elem]
+
+    def loc_effect(sel):
+        if "recaptcha" in sel:
+            return loc
+        m = MagicMock()
+        m.count.return_value = 0
+        m.all.return_value = []
+        return m
+
+    page.locator.side_effect = loc_effect
+    assert ats._detect_captcha(page) is True
+
+
+
 
 
 

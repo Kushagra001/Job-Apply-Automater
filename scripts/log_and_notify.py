@@ -147,10 +147,10 @@ def get_processed_urls(include_dry_run: bool | None = None) -> set[str]:
         sheet = _get_sheet()
         all_rows = sheet.get_all_records()
 
-        # Calculate failure counts per URL
+        # Calculate failure / challenge counts per URL (retry up to 3 times before locking out)
         failure_counts = {}
         for r in all_rows:
-            if r.get("status") in ("apply_failed", "apply_error"):
+            if r.get("status") in ("apply_failed", "apply_error", "requires_captcha"):
                 url = str(r.get("apply_url", "")).strip()
                 if url:
                     failure_counts[url] = failure_counts.get(url, 0) + 1
