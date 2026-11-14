@@ -608,8 +608,10 @@ def test_detect_captcha_multi_iframe_and_frames_url():
     page2.frames = []
     el_hidden = MagicMock()
     el_hidden.is_visible.return_value = False
+    el_hidden.bounding_box.return_value = {"width": 0, "height": 0}
     el_visible = MagicMock()
     el_visible.is_visible.return_value = True
+    el_visible.bounding_box.return_value = {"width": 300, "height": 400}
 
     hcaptcha_loc = MagicMock()
     hcaptcha_loc.count.return_value = 2

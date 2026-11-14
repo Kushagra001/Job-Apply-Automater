@@ -240,16 +240,13 @@ def _detect_captcha(page) -> bool:
             logger.warning("Active challenge page detected via title: '%s'", title)
             return True
 
-        # Check all frames for active challenge URLs (e.g. Lever hCaptcha challenge iframe)
+        # Check all frames for explicit interactive challenge URLs (e.g. Lever hCaptcha challenge popup)
         if hasattr(page, "frames"):
             for f in page.frames:
                 f_url = (getattr(f, "url", "") or "").lower()
                 if any(k in f_url for k in [
                     "hcaptcha.html#frame=challenge",
                     "challenges.cloudflare.com",
-                    "recaptcha/api2/bframe",
-                    "recaptcha/enterprise/bframe",
-                    "arkoselabs",
                 ]):
                     logger.warning("Active challenge frame detected via URL: %s", getattr(f, "url", "")[:80])
                     return True
@@ -261,15 +258,20 @@ def _detect_captcha(page) -> bool:
             "iframe[src*='arkoselabs']",
             ".cf-turnstile", "#cf-turnstile",
             ".g-recaptcha", ".h-captcha",
-            "div[id*='captcha']", "div[class*='captcha']",
+            "div[id*='captcha' i]", "div[class*='captcha' i]",
         ]
         for sel in captcha_selectors:
             loc = page.locator(sel)
             if loc.count() > 0:
                 for el in loc.all():
-                    if el.is_visible():
-                        logger.warning("Active captcha detected via selector: %s", sel)
-                        return True
+                    try:
+                        if el.is_visible():
+                            box = el.bounding_box()
+                            if box and box["width"] > 20 and box["height"] > 20:
+                                logger.warning("Active visible captcha detected via selector: %s (%dx%d)", sel, int(box["width"]), int(box["height"]))
+                                return True
+                    except Exception:
+                        continue
 
         return False
     except Exception as e:
